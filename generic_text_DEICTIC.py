@@ -162,16 +162,16 @@ def main():
     # OW, it doesn't converge.
     # PAIRED_NEXT -> use value of corresponding patch on the next step
     # MAX_NEXT -> use max value over all next-step patches
-#    NEXT_PATCH = "PAIRED_NEXT"
-    NEXT_PATCH = "MAX_NEXT"
+    NEXT_PATCH = "PAIRED_NEXT"
+#    NEXT_PATCH = "MAX_NEXT"
 
     # If MIN_OVER_BATCH is true, then we find the min value over all targets that have
     # the same corresponding patch. In principle, this should always help. The larger
     # the batch size, the more it should help. However, in practice, I find that
     # it seems to cap the maximum achievable performance. On the other hand, it can
     # help convergence when using NEXT_PATCH = "MAX_NEXT".
-    MIN_OVER_BATCH = True
-#    MIN_OVER_BATCH = False
+#    MIN_OVER_BATCH = True
+    MIN_OVER_BATCH = False
 
     # If MIN_OR_AVG_Q is "MIN", then we use the minimum Q value as calculated via the cascade.
     # OW (if "AVG"), we use the standard expected value Q value. "MIN" should work. "AVG" is
@@ -182,8 +182,8 @@ def main():
     
     # If true, ROTATION_AUGMENTATION augments the agent's experience with
     # rotated versions of the patches. I typically turn this off.
-    ROTATION_AUGMENTATION = True
-#    ROTATION_AUGMENTATION = False
+#    ROTATION_AUGMENTATION = True
+    ROTATION_AUGMENTATION = False
     
 
     # ******* Load the environment ********

@@ -1,10 +1,10 @@
 #
-# Three-block version of blockarrange. In this file, I'm planning to augment
-#          state w/ a remembered place descriptor.
+# In this version of the code, I'm going to try to implement a deictic version of 
+# block arrange that creates look and grasp as two separate actions that must
+# be sequenced in order to act successfully.
 #
-# Adapted from blockarrangeredo3.py
-#
-#
+# I never got this code to work. For now, I am abandoning in favor of something
+# based more closely on blockarrangeredo 2 or 3...
 #
 import gym
 import numpy as np
@@ -12,29 +12,27 @@ import time as time
 import tensorflow as tf
 import tf_util_rob as U
 import models as models
-from replay_buffer4 import ReplayBuffer, PrioritizedReplayBuffer
+#from replay_buffer2 import ReplayBuffer, PrioritizedReplayBuffer
+from replay_buffer6 import ReplayBuffer, PrioritizedReplayBuffer
 from schedules import LinearSchedule
 
-import envs.blockarrange_3blocks as envstandalone
+import envs.blockarrange_deictic as envstandalone
 
 # **** Make tensorflow functions ****
 
-def build_getq(make_actionDeic_ph, q_func, num_states, num_cascade, scope="deepq", qscope="q_func", reuse=None):
+def build_getq(make_deic_ph, q_func, scope="deepq", qscope="q_func", reuse=None):
 
     with tf.variable_scope(scope, reuse=reuse):
-
-        actions_ph = U.ensure_tf_input(make_actionDeic_ph("actions"))
+        actions_ph = U.ensure_tf_input(make_deic_ph("stateaction"))
         q_values = q_func(actions_ph.get(), 1, scope=qscope)
         getq = U.function(inputs=[actions_ph], outputs=q_values)
         return getq
 
 
-def build_targetTrain(make_actionDeic_ph,
+def build_targetTrain(make_deic_ph,
                         make_target_ph,
                         make_weight_ph,
                         q_func,
-                        num_states,
-                        num_cascade,
                         optimizer,
                         scope="deepq", 
                         qscope="q_func",
@@ -44,7 +42,7 @@ def build_targetTrain(make_actionDeic_ph,
     with tf.variable_scope(scope, reuse=reuse):
         
         # set up placeholders
-        obs_t_input = U.ensure_tf_input(make_actionDeic_ph("action_t_deic"))
+        obs_t_input = U.ensure_tf_input(make_deic_ph("action_t_deic"))
         target_input = U.ensure_tf_input(make_target_ph("target"))
         importance_weights_ph = U.ensure_tf_input(make_weight_ph("target"))
     
@@ -109,39 +107,10 @@ def main():
     
     np.set_printoptions(formatter={'float_kind':lambda x: "%.2f" % x})
 
-    # Dictionary-based value function
-    q_func_tabular = {}
-
-    # cols of vectorKey must be boolean less than 64 bits long
-    def getTabularKeys(vectorKey):
-        obsBits = np.packbits(vectorKey,1)
-        obsKeys = 0
-        for i in range(np.shape(obsBits)[1]):
-            # IMPORTANT: the number of bits in the type cast below (UINT64) must be at least as big
-            # as the bits required to encode obsBits. If it is too small, we get hash collisions...
-            obsKeys = obsKeys + (256**i) * np.uint64(obsBits[:,i])
-        return obsKeys
-    
-    def getTabular(vectorKey):
-        keys = getTabularKeys(vectorKey)
-        return np.array([q_func_tabular[x] if x in q_func_tabular else 10*np.ones(num_states) for x in keys])
-    
-#    def trainTabular(vectorKey,qCurrTargets,weights):
-    def trainTabular(vectorKey,qCurrTargets,weights):
-        keys = getTabularKeys(vectorKey)
-        alpha=0.2
-        for i in range(len(keys)):
-            if keys[i] in q_func_tabular:
-#                q_func_tabular[keys[i]] = (1-alpha)*q_func_tabular[keys[i]] + alpha*qCurrTargets[i]
-                q_func_tabular[keys[i]] = q_func_tabular[keys[i]] + alpha*weights[i]*(qCurrTargets[i] - q_func_tabular[keys[i]]) # (1-alpha)*q_func[keys[i]] + alpha*qCurrTargets[i]
-            else:
-                q_func_tabular[keys[i]] = qCurrTargets[i]
-
-
     env = envstandalone.BlockArrange()
 
     # Standard q-learning parameters
-    max_timesteps=16000
+    max_timesteps=50000
     exploration_fraction=0.3
     exploration_final_eps=0.1
     gamma=.90
@@ -149,24 +118,26 @@ def main():
 
     # Used by buffering and DQN
     learning_starts=10
-    buffer_size=100
-    batch_size=10
+    buffer_size=1
+    batch_size=1
     target_network_update_freq=1
     train_freq=1
     print_freq=1
     lr=0.0003
 
     # first two elts of deicticShape must be odd
-    actionShape = (3,3,2)
-    stateActionShape = (3,3,3) # includes place memory
-    num_states = 2 # either holding or not
+#    actionShape = (3,3,2)
+    patchShape = (3,3,1)
+    lookstackShape = (3,3,2)
+    lookShape = (3,3,3)
+    ppShape = (3,3,2)
+#    num_states = 2 # either holding or not
     num_patches = env.maxSide**2
-    num_actions = 2*num_patches
     num_actions_discrete = 2
-#    valueFunctionType = "TABULAR"
+    num_actions = num_patches + num_actions_discrete
     valueFunctionType = "DQN"
-#    actionSelectionStrategy = "UNIFORM_RANDOM" # actions are selected randomly from collection of all actions
-    actionSelectionStrategy = "RANDOM_UNIQUE" # each unique action descriptor has equal chance of being selected
+    actionSelectionStrategy = "UNIFORM_RANDOM" # actions are selected randomly from collection of all actions
+#    actionSelectionStrategy = "RANDOM_UNIQUE" # each unique action descriptor has equal chance of being selected
 
     episode_rewards = [0.0]
     
@@ -206,12 +177,28 @@ def main():
         dueling=True
     )
 
+    def displayLookStack(lookStack):
+        np.set_printoptions(formatter={'float_kind':lambda x: "%.2f" % x})
+        lookStack1 = str(lookStack[:,:,0])
+        lookStack1 = np.core.defchararray.replace(lookStack1,".00","")
+        lookStack1 = np.core.defchararray.replace(lookStack1,".","")
+        lookStack1 = np.core.defchararray.replace(lookStack1,"0",".")
+        lookStack2 = str(lookStack[:,:,1])
+        lookStack2 = np.core.defchararray.replace(lookStack2,".00","")
+        lookStack2 = np.core.defchararray.replace(lookStack2,".","")
+        lookStack2 = np.core.defchararray.replace(lookStack2,"0",".")
+        print("lookStack:")
+        print(lookStack1)
+        print(lookStack2)
+
     def make_obs_ph(name):
         return U.BatchInput(env.observation_space.spaces[0].shape, name=name)
 
-    def make_actionDeic_ph(name):
-#        return U.BatchInput(actionShape, name=name)
-        return U.BatchInput(stateActionShape, name=name)
+    def make_lookDeic_ph(name):
+        return U.BatchInput(lookShape, name=name)
+
+    def make_ppDeic_ph(name):
+        return U.BatchInput(ppShape, name=name)
 
     def make_target_ph(name):
         return U.BatchInput([1], name=name)
@@ -219,166 +206,193 @@ def main():
     def make_weight_ph(name):
         return U.BatchInput([1], name=name)
 
-    getMoveActionDescriptors = build_getMoveActionDescriptors(make_obs_ph=make_obs_ph,deicticShape=actionShape)
+    getMoveActionDescriptors = build_getMoveActionDescriptors(make_obs_ph=make_obs_ph,deicticShape=lookShape)
     
-    if valueFunctionType == 'DQN':
-        getqNotHolding = build_getq(
-                make_actionDeic_ph=make_actionDeic_ph,
-                q_func=q_func,
-                num_states=num_states,
-                num_cascade=5,
-                scope="deepq",
-                qscope="q_func_notholding"
-                )
-        getqHolding = build_getq(
-                make_actionDeic_ph=make_actionDeic_ph,
-                q_func=q_func,
-                num_states=num_states,
-                num_cascade=5,
-                scope="deepq",
-                qscope="q_func_holding"
-                )
+    getqLookNotHolding = build_getq(
+            make_deic_ph=make_lookDeic_ph,
+            q_func=q_func,
+            scope="deepq",
+            qscope="q_func_LookNotHolding"
+            )
+    getqLookHolding = build_getq(
+            make_deic_ph=make_lookDeic_ph,
+            q_func=q_func,
+            scope="deepq",
+            qscope="q_func_LookHolding"
+            )
+    getqPPNotHolding = build_getq(
+            make_deic_ph=make_ppDeic_ph,
+            q_func=q_func,
+            scope="deepq",
+            qscope="q_func_PPNotHolding"
+            )
+    getqPPHolding = build_getq(
+            make_deic_ph=make_ppDeic_ph,
+            q_func=q_func,
+            scope="deepq",
+            qscope="q_func_PPHolding"
+            )
     
-        targetTrainNotHolding = build_targetTrain(
-            make_actionDeic_ph=make_actionDeic_ph,
-            make_target_ph=make_target_ph,
-            make_weight_ph=make_weight_ph,
-            q_func=q_func,
-            num_states=num_states,
-            num_cascade=5,
-            optimizer=tf.train.AdamOptimizer(learning_rate=lr),
-            scope="deepq", 
-            qscope="q_func_notholding",
-            grad_norm_clipping=1.
-        )
-
-        targetTrainHolding = build_targetTrain(
-            make_actionDeic_ph=make_actionDeic_ph,
-            make_target_ph=make_target_ph,
-            make_weight_ph=make_weight_ph,
-            q_func=q_func,
-            num_states=num_states,
-            num_cascade=5,
-            optimizer=tf.train.AdamOptimizer(learning_rate=lr),
-            scope="deepq", 
-            qscope="q_func_holding",
-            grad_norm_clipping=1.
-        )
+    targetTrainLookNotHolding = build_targetTrain(
+        make_deic_ph=make_lookDeic_ph,
+        make_target_ph=make_target_ph,
+        make_weight_ph=make_weight_ph,
+        q_func=q_func,
+        optimizer=tf.train.AdamOptimizer(learning_rate=lr),
+        scope="deepq", 
+        qscope="q_func_LookNotHolding",
+        grad_norm_clipping=1.
+    )
+    targetTrainLookHolding = build_targetTrain(
+        make_deic_ph=make_lookDeic_ph,
+        make_target_ph=make_target_ph,
+        make_weight_ph=make_weight_ph,
+        q_func=q_func,
+        optimizer=tf.train.AdamOptimizer(learning_rate=lr),
+        scope="deepq", 
+        qscope="q_func_LookHolding",
+        grad_norm_clipping=1.
+    )
+    targetTrainPPNotHolding = build_targetTrain(
+        make_deic_ph=make_ppDeic_ph,
+        make_target_ph=make_target_ph,
+        make_weight_ph=make_weight_ph,
+        q_func=q_func,
+        optimizer=tf.train.AdamOptimizer(learning_rate=lr),
+        scope="deepq", 
+        qscope="q_func_PPNotHolding",
+        grad_norm_clipping=1.
+    )
+    targetTrainPPHolding = build_targetTrain(
+        make_deic_ph=make_ppDeic_ph,
+        make_target_ph=make_target_ph,
+        make_weight_ph=make_weight_ph,
+        q_func=q_func,
+        optimizer=tf.train.AdamOptimizer(learning_rate=lr),
+        scope="deepq", 
+        qscope="q_func_PPHolding",
+        grad_norm_clipping=1.
+    )
         
     sess = U.make_session(num_cpu)
     sess.__enter__()
 
     obs = env.reset()
-
+    lookStack = np.zeros(lookstackShape)
+    lookStackNext = np.zeros(lookstackShape)
+    
     episode_rewards = [0.0]
     td_errors = [0.0]
     timerStart = time.time()
     U.initialize()
-    placeMemory = np.zeros([actionShape[0], actionShape[1], 1])
     for t in range(max_timesteps):
         
         # Get action set: <num_patches> pick actions followed by <num_patches> place actions
         moveDescriptors = getMoveActionDescriptors([obs[0]])
         moveDescriptors = moveDescriptors*2-1
-        actionsPickDescriptors = np.stack([moveDescriptors, np.zeros(np.shape(moveDescriptors))],axis=3)
-        actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptors)),moveDescriptors],axis=3)
-        actionDescriptors = np.r_[actionsPickDescriptors,actionsPlaceDescriptors]
-
-        # Augment with state, i.e. place memory
-        stateActionDescriptors = np.concatenate([actionDescriptors, np.repeat([placeMemory],num_patches*num_actions_discrete,axis=0)],axis=3)
-
-        # Get qCurr values
-        if valueFunctionType == "TABULAR":
-            actionDescriptorsFlat = np.reshape(actionDescriptors,[-1,actionShape[0]*actionShape[1]*actionShape[2]]) == 1
-            qCurr = getTabular(actionDescriptorsFlat)
-        else:
-#            qCurrNotHolding = getqNotHolding(actionDescriptors)
-#            qCurrHolding = getqHolding(actionDescriptors)
-            qCurrNotHolding = getqNotHolding(stateActionDescriptors)
-            qCurrHolding = getqHolding(stateActionDescriptors)
-            qCurr = np.concatenate([qCurrNotHolding,qCurrHolding],axis=1)
+        moveDescriptors = np.reshape(moveDescriptors,[num_patches,patchShape[0],patchShape[1],patchShape[2]])
+        looksStackTiled = np.tile(lookStack,[num_patches,1,1,1])
+        lookDescriptors = np.concatenate([moveDescriptors,looksStackTiled],axis=3)
+        
+        if obs[1] == 0: # not holding
+            qCurrLook = getqLookNotHolding(lookDescriptors)
+            qCurrPP = np.r_[getqPPNotHolding([lookStack]),[[0]]]
+        else: # holding
+            qCurrLook = getqLookHolding(lookDescriptors)
+            qCurrPP = np.r_[[[0]],getqPPHolding([lookStack])]
+        qCurr = np.concatenate([qCurrLook,qCurrPP],axis=0)
 
         # select action at random
         qCurrNoise = qCurr + np.random.random(np.shape(qCurr))*0.01 # add small amount of noise to break ties randomly
         if actionSelectionStrategy == "UNIFORM_RANDOM":
-            action = np.argmax(qCurrNoise[:,obs[1]])
+            action = np.argmax(qCurrNoise)
             if np.random.rand() < exploration.value(t):
-                action = np.random.randint(num_actions)
+                actionClass = np.random.randint(3)
+                if actionClass == 0:
+                    action = np.random.randint(num_patches)
+                else:
+                    action = np.random.randint(num_patches,num_patches+2)
+#                action = np.random.randint(num_actions)
         elif actionSelectionStrategy == "RANDOM_UNIQUE":
-            _,idx,inv = np.unique(actionDescriptors,axis=0,return_index=True,return_inverse=True)
-            actionIdx = np.argmax(qCurrNoise[idx,obs[1]])
+            _,idx,inv = np.unique(lookDescriptors,axis=0,return_index=True,return_inverse=True)
+            idx = np.r_[idx,num_patches,num_patches+1]
+            actionIdx = np.argmax(qCurrNoise[idx])
             if np.random.rand() < exploration.value(t):
                 actionIdx = np.random.randint(len(idx))
-            actionsSelected = np.nonzero(inv==actionIdx)[0]
-            action = actionsSelected[np.random.randint(len(actionsSelected))]
+            if actionIdx < len(idx)-2:
+                actionsSelected = np.nonzero(inv==actionIdx)[0]
+                action = actionsSelected[np.random.randint(len(actionsSelected))]
+            else:
+                action = idx[actionIdx]
         else:
             print("Error...")
+
 
         # take action
         new_obs, rew, done, _ = env.step(action)
         
-#        replay_buffer.add(obs[1], actionDescriptors[action,:], rew, new_obs, float(done))
+        # If look action, then update look stack
+        if action < num_patches:
+            lookStackNext[:,:,1] = np.copy(lookStack[:,:,0])
+            lookStackNext[:,:,0] = np.copy(moveDescriptors[action][:,:,0])
+            lookAction = moveDescriptors[action]
+            discreteAction = 0
+        else:
+            lookAction = np.zeros(patchShape)
+            discreteAction = action - num_patches
         
-        # if a block has just been placed, then update placeMemory
-        if (obs[1] > 0) and (new_obs[1] == 0):
-            placeMemory = np.reshape(stateActionDescriptors[action][:,:,1],[actionShape[0],actionShape[1],1])
-
-        # add to replay buffer
-        new_obs.append(placeMemory)
-        replay_buffer.add(obs[1], stateActionDescriptors[action,:], rew, new_obs, float(done))
-
+        print("action: " + str(action))
+        env.render()
+        print("Reward: " + str(rew) + ", done: " + str(done))
+        displayLookStack(lookStackNext)
+        
+        # discrete state, look state, discrete action, look action, reward, discrete next state, look next state, done
+        replay_buffer.add(obs[1], lookStack, discreteAction, lookAction, rew, new_obs[1], lookStackNext, new_obs[0], float(done))
+        
+        lookStack = np.copy(lookStackNext)
+        
         if t > learning_starts and t % train_freq == 0:
 
             # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
             if prioritized_replay:
                 beta=beta_schedule.value(t)
-                states_t, actionPatches, rewards, images_tp1, states_tp1, placeMemory_tp1, dones, weights, batch_idxes = replay_buffer.sample(batch_size, beta)
+                states_t, actionPatches, rewards, images_tp1, states_tp1, dones, weights, batch_idxes = replay_buffer.sample(batch_size, beta)
             else:
-                states_t, actionPatches, rewards, images_tp1, states_tp1, placeMemory_tp1, dones = replay_buffer.sample(batch_size)
+                statesHolding_t, statesLookStack_t, actionsDiscrete, lookActions, rewards, statesHolding_tp1, statesLookStack_tp1, observations_tp1, dones = replay_buffer.sample(batch_size)
                 weights, batch_idxes = np.ones_like(rewards), None
 
-            moveDescriptorsNext = getMoveActionDescriptors(images_tp1)
+            moveDescriptorsNext = getMoveActionDescriptors(observations_tp1)
             moveDescriptorsNext = moveDescriptorsNext*2-1
+            moveDescriptorsNext = np.reshape(moveDescriptorsNext,[-1,patchShape[0],patchShape[1],patchShape[2]])
+            looksStackNextTiled = np.repeat(statesLookStack_tp1,num_patches,axis=0)
+            lookDescriptorsNext = np.concatenate([moveDescriptorsNext,looksStackNextTiled],axis=3)
 
-            actionsPickDescriptorsNext = np.stack([moveDescriptorsNext, np.zeros(np.shape(moveDescriptorsNext))],axis=3)
-            actionsPlaceDescriptorsNext = np.stack([np.zeros(np.shape(moveDescriptorsNext)), moveDescriptorsNext],axis=3)
-            actionDescriptorsNext = np.stack([actionsPickDescriptorsNext, actionsPlaceDescriptorsNext], axis=0)
-            actionDescriptorsNext = np.reshape(actionDescriptorsNext,[batch_size*num_patches*num_actions_discrete,actionShape[0],actionShape[1],actionShape[2]])
+            # calculate qNext
+            qNextLookNotHolding = np.max(np.reshape(getqLookNotHolding(lookDescriptorsNext),[batch_size,num_patches,1]),axis=1)
+            qNextLookHolding = np.max(np.reshape(getqLookHolding(lookDescriptorsNext),[batch_size,num_patches,1]),axis=1)
+            qNextPPNotHolding = getqPPNotHolding(statesLookStack_tp1)
+            qNextPPHolding = getqPPHolding(statesLookStack_tp1)
+            qNextNotHolding = np.max(np.c_[qNextLookNotHolding,qNextPPNotHolding],axis=1)
+            qNextHolding = np.max(np.c_[qNextLookHolding,qNextPPHolding],axis=1)
+            qNext = np.stack([qNextNotHolding,qNextHolding],axis=1)
 
-            # Augment with state, i.e. place memory
-            placeMemory_tp1_expanded = np.repeat(placeMemory_tp1,num_patches*num_actions_discrete,axis=0)
-            stateActionDescriptorsNext = np.concatenate([actionDescriptorsNext, placeMemory_tp1_expanded],axis=3)
-
-            if valueFunctionType == "TABULAR":
-                actionDescriptorsNextFlat = np.reshape(actionDescriptorsNext,[batch_size*num_patches*num_actions_discrete,-1]) == 1
-                qNextFlat = getTabular(actionDescriptorsNextFlat)
-            else:
-#                qNextNotHolding = getqNotHolding(actionDescriptorsNext)
-#                qNextHolding = getqHolding(actionDescriptorsNext)
-                qNextNotHolding = getqNotHolding(stateActionDescriptorsNext)
-                qNextHolding = getqHolding(stateActionDescriptorsNext)
-                qNextFlat = np.concatenate([qNextNotHolding,qNextHolding],axis=1)
-
-            qNext = np.reshape(qNextFlat,[batch_size,num_patches,num_actions_discrete,num_states])
-            qNextmax = np.max(np.max(qNext[range(batch_size),:,:,states_tp1],2),1)
-            targets = rewards + (1-dones) * gamma * qNextmax
+            targets = rewards + (1-dones) * gamma * qNext[range(batch_size),statesHolding_tp1]
             
-            if valueFunctionType == "TABULAR":
-                actionsFlat = np.reshape(actionPatches,[batch_size,-1]) == 1
-                qCurrTarget = getTabular(actionsFlat)
-            else:
-                qCurrTargetNotHolding = getqNotHolding(actionPatches)
-                qCurrTargetHolding = getqHolding(actionPatches)
-                qCurrTarget = np.concatenate([qCurrTargetNotHolding,qCurrTargetHolding],axis=1)
+            # Calculate qCurrTarget
+            lookDescriptors = np.concatenate([lookActions,statesLookStack_t],axis=3)
+            qCurrLookNotHoldingT = getqLookNotHolding(lookDescriptors)
+            qCurrLookHoldingT = getqLookHolding(lookDescriptors)
+            qCurrPPNotHoldingT = getqPPNotHolding(statesLookStack_t)
+            qCurrPPHoldingT = getqPPHolding(statesLookStack_t)
+            qCurrT = np.c_[qCurrLookNotHoldingT,qCurrPPNotHoldingT,qCurrLookHoldingT,qCurrPPHoldingT]
+            
+            td_error = qCurrT[range(batch_size),np.int32(actionsDiscrete > 0) + (2*statesHolding_t)] - targets
+            qCurrT[range(batch_size),np.int32(actionsDiscrete > 0) + (2*statesHolding_t)] = targets
 
-            td_error = qCurrTarget[range(batch_size),states_t] - targets
-            qCurrTarget[range(batch_size),states_t] = targets
-
-            if valueFunctionType == "TABULAR":
-                trainTabular(actionsFlat, qCurrTarget, np.tile(np.reshape(weights,[batch_size,1]),[1,2]))
-            else:
-                targetTrainNotHolding(actionPatches, np.reshape(qCurrTarget[:,0],[batch_size,1]), np.reshape(weights,[batch_size,1]))
-                targetTrainHolding(actionPatches, np.reshape(qCurrTarget[:,1],[batch_size,1]), np.reshape(weights,[batch_size,1]))
+            targetTrainLookNotHolding(lookDescriptors,  np.reshape(qCurrT[:,0],[batch_size,1]), np.reshape(weights,[batch_size,1]))
+            targetTrainPPNotHolding(statesLookStack_t, np.reshape(qCurrT[:,1],[batch_size,1]), np.reshape(weights,[batch_size,1]))
+            targetTrainLookHolding(lookDescriptors, np.reshape(qCurrT[:,2],[batch_size,1]), np.reshape(weights,[batch_size,1]))
+            targetTrainPPHolding(statesLookStack_t, np.reshape(qCurrT[:,3],[batch_size,1]), np.reshape(weights,[batch_size,1]))
 
             if prioritized_replay:
                 new_priorities = np.abs(td_error) + prioritized_replay_eps

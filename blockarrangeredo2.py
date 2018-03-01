@@ -1,6 +1,6 @@
 #
 # This is the replay buffer version of blockarrangeredo1.py. This version of the code
-# works well for batch_size=1, buffer_size=1 with either tabular or replay buffer.
+# works well for batch_size=1000, buffer_size=32 with either tabular or dqn
 #
 # Adapted from blockarrangeredo1.py
 #
@@ -20,6 +20,15 @@
 #          -- TAB/NR 10/1: converges perfectly
 #          -- DQN/NR 1/1: pick converges correctly to 8.98
 #
+#          I fixed a bug in line 346 where I was stacking along axis 0 instead of axis 1. I think 
+#          this improves on my results above. Now I get:
+#
+#          -- DQN/R 100/10: pick converges to 8.50 or 8.76 or 6.88 or 9.67 instead of 9.0
+#          -- DQN/R 1000/32: pick convg to 9.03, 9.01, or 8.84 -- this combination worked really well!!!
+#
+# Also: this version can work for a three block in a row scenario. In that case, it
+#       converges to averaged values for the first or second pick operation.
+#
 import gym
 import numpy as np
 import time as time
@@ -30,7 +39,8 @@ import models as models
 from replay_buffer2 import ReplayBuffer, PrioritizedReplayBuffer
 from schedules import LinearSchedule
 
-import envs.blockarrange_2blocks as envstandalone
+#import envs.blockarrange_2blocks as envstandalone
+import envs.blockarrange_3blocks as envstandalone
 
 # **** Make tensorflow functions ****
 
@@ -164,8 +174,8 @@ def main():
 
     # Used by buffering and DQN
     learning_starts=10
-    buffer_size=100
-    batch_size=10
+    buffer_size=1000
+    batch_size=32
     target_network_update_freq=1
     train_freq=1
     print_freq=1
@@ -324,7 +334,7 @@ def main():
         # take action
         new_obs, rew, done, _ = env.step(action)
         
-        replay_buffer.add(obs[1], actionDescriptors[action,:], rew, new_obs, float(done))
+        replay_buffer.add(obs[1], actionDescriptors[action,:], rew, np.copy(new_obs), float(done))
 
         if t > learning_starts and t % train_freq == 0:
 
@@ -341,7 +351,7 @@ def main():
 
             actionsPickDescriptorsNext = np.stack([moveDescriptorsNext, np.zeros(np.shape(moveDescriptorsNext))],axis=3)
             actionsPlaceDescriptorsNext = np.stack([np.zeros(np.shape(moveDescriptorsNext)), moveDescriptorsNext],axis=3)
-            actionDescriptorsNext = np.stack([actionsPickDescriptorsNext, actionsPlaceDescriptorsNext], axis=0)
+            actionDescriptorsNext = np.stack([actionsPickDescriptorsNext, actionsPlaceDescriptorsNext], axis=1) # I sometimes get this axis parameter wrong... pay attention!
             actionDescriptorsNext = np.reshape(actionDescriptorsNext,[batch_size*num_patches*num_actions_discrete,actionShape[0],actionShape[1],actionShape[2]])
 
             if valueFunctionType == "TABULAR":

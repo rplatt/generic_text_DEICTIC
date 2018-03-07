@@ -139,10 +139,10 @@ def build_getMoveActionDescriptorsRot(make_obs_ph,patchSize,handSize,smallSize,s
     patchesShape = tf.shape(patches)
     patchesTiled = tf.reshape(patches,[patchesShape[0]*patchesShape[1]*patchesShape[2],patchExpanded,patchExpanded,1])
     patchesTiledRot0 = tf.contrib.image.rotate(patchesTiled,0)
-    patchesTiledRot1 = tf.contrib.image.rotate(patchesTiled,np.pi/4)
-#    patchesTiledRot2 = tf.contrib.image.rotate(patchesTiled,2*np.pi/4)
+#    patchesTiledRot1 = tf.contrib.image.rotate(patchesTiled,np.pi/4)
+    patchesTiledRot2 = tf.contrib.image.rotate(patchesTiled,2*np.pi/4)
 #    patchesTiledRot3 = tf.contrib.image.rotate(patchesTiled,3*np.pi/4)
-    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot1],axis=0)
+    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot2],axis=0)
 #    patchesTiledAll = patchesTiled
     
     patchesTiledRotCrop = tf.image.resize_image_with_crop_or_pad(patchesTiledAll,patchSize,patchSize)
@@ -171,7 +171,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     # Standard q-learning parameters
     reuseModels = None
     max_timesteps=inputmaxtimesteps
-    exploration_fraction=0.3
+    exploration_fraction=0.5
     exploration_final_eps=0.1
     gamma=.90
     num_cpu = 16
@@ -346,9 +346,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
             env.render()
             
         # Execute action
-        action2take = action
-#        new_obs, rew, done, _ = env.step(action)
-        new_obs, rew, done, _ = env.step(action2take)
+        new_obs, rew, done, _ = env.step(action)
         replay_buffer.add(cp.copy(obs[1]), np.copy(actionDescriptors[action,:]), cp.copy(rew), cp.copy(new_obs[1]), cp.copy(float(done)))
 
         if vispolicy:

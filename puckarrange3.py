@@ -139,10 +139,14 @@ def build_getMoveActionDescriptorsRot(make_obs_ph,patchSize,handSize,smallSize,s
     patchesShape = tf.shape(patches)
     patchesTiled = tf.reshape(patches,[patchesShape[0]*patchesShape[1]*patchesShape[2],patchExpanded,patchExpanded,1])
     patchesTiledRot0 = tf.contrib.image.rotate(patchesTiled,0)
-#    patchesTiledRot1 = tf.contrib.image.rotate(patchesTiled,np.pi/4)
+    patchesTiledRot1 = tf.contrib.image.rotate(patchesTiled,np.pi/4)
     patchesTiledRot2 = tf.contrib.image.rotate(patchesTiled,2*np.pi/4)
-#    patchesTiledRot3 = tf.contrib.image.rotate(patchesTiled,3*np.pi/4)
-    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot2],axis=0)
+    patchesTiledRot3 = tf.contrib.image.rotate(patchesTiled,3*np.pi/4)
+#    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot1],axis=0)
+#    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot1,patchesTiledRot2,patchesTiledRot3],axis=0)
+#    patchesTiledAll = tf.concat([patchesTiledRot1,patchesTiledRot1,patchesTiledRot3,patchesTiledRot3],axis=0)
+    patchesTiledAll = tf.concat([patchesTiledRot1,patchesTiledRot1,patchesTiledRot3,patchesTiledRot3],axis=0)
+#    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot0,patchesTiledRot2,patchesTiledRot2],axis=0)
 #    patchesTiledAll = patchesTiled
     
     patchesTiledRotCrop = tf.image.resize_image_with_crop_or_pad(patchesTiledAll,patchSize,patchSize)
@@ -339,11 +343,14 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         qCurrNoise = qCurr + np.random.random(np.shape(qCurr))*0.01 # add small amount of noise to break ties randomly
         action = np.argmax(qCurrNoise[:,obs[1]])
         if (np.random.rand() < exploration.value(t)) and not vispolicy:
-            action = np.random.randint(2*num_actions)
+#            action = np.random.randint(2*num_actions)
+            action = np.random.randint(4*num_actions)
 
         if vispolicy:
             print("action: " + str(action))
-            env.render()
+            plt.subplot(1,2,1)
+            plt.imshow(env.state[0][:,:,0])
+#            env.render()
             
         # Execute action
         new_obs, rew, done, _ = env.step(action)
@@ -352,7 +359,11 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         if vispolicy:
             print("rew: " + str(rew))
             print("done: " + str(done))
-            env.render()
+#            env.render()
+            plt.subplot(1,2,2)
+            plt.imshow(env.state[0][:,:,0])
+            plt.show()
+            
         
         if t > learning_starts and t % train_freq == 0:
 
@@ -429,6 +440,10 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     print(str(np.reshape(qPick[:gridSize**2,0],[gridSize,gridSize])))
     print("Value function for pick action for rot1 in hold-0 state:")
     print(str(np.reshape(qPick[gridSize**2:2*gridSize**2,0],[gridSize,gridSize])))
+    print("Value function for pick action for rot2 in hold-0 state:")
+    print(str(np.reshape(qPick[2*gridSize**2:3*gridSize**2,0],[gridSize,gridSize])))
+    print("Value function for pick action for rot3 in hold-0 state:")
+    print(str(np.reshape(qPick[3*gridSize**2:4*gridSize**2,0],[gridSize,gridSize])))
 
     qPlaceNotHolding = getqNotHolding(actionsPlaceDescriptors)
     qPlaceHolding = getqHolding(actionsPlaceDescriptors)
@@ -437,17 +452,29 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     print(str(np.reshape(qPlace[:gridSize**2,1],[gridSize,gridSize])))
     print("Value function for place action for rot1 in hold-1 state:")
     print(str(np.reshape(qPlace[gridSize**2:2*gridSize**2,1],[gridSize,gridSize])))
+    print("Value function for place action for rot2 in hold-1 state:")
+    print(str(np.reshape(qPlace[2*gridSize**2:3*gridSize**2,1],[gridSize,gridSize])))
+    print("Value function for place action for rot3 in hold-1 state:")
+    print(str(np.reshape(qPlace[3*gridSize**2:4*gridSize**2,1],[gridSize,gridSize])))
     
-    plt.subplot(2,3,1)
+    plt.subplot(2,5,1)
     plt.imshow(np.tile(env.state[0],[1,1,3]),interpolation=None)
-    plt.subplot(2,3,2)
+    plt.subplot(2,5,2)
     plt.imshow(np.reshape(qPick[:gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,3,3)
-    plt.imshow(np.reshape(qPlace[:gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,3,5)
+    plt.subplot(2,5,3)
     plt.imshow(np.reshape(qPick[gridSize**2:2*gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,3,6)
+    plt.subplot(2,5,4)
+    plt.imshow(np.reshape(qPick[2*gridSize**2:3*gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,5,5)
+    plt.imshow(np.reshape(qPick[3*gridSize**2:4*gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,5,7)
+    plt.imshow(np.reshape(qPlace[:gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,5,8)
     plt.imshow(np.reshape(qPlace[gridSize**2:2*gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,5,9)
+    plt.imshow(np.reshape(qPlace[2*gridSize**2:3*gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,5,10)
+    plt.imshow(np.reshape(qPlace[3*gridSize**2:4*gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
     plt.show()
 
 if len(sys.argv) == 7:

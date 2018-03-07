@@ -54,7 +54,8 @@ class PuckArrange:
 #        self.blockType = 'Disks'
         self.blockType = 'Blocks'
 #        self.num_orientations = 1
-        self.num_orientations = 2 # number of orientations between 0 and pi
+#        self.num_orientations = 2
+        self.num_orientations = 4 # number of orientations between 0 and pi
         
         if self.blockType == 'Numerals': # load MNIST numerals
             mnist = tf.contrib.learn.datasets.load_dataset("mnist")
@@ -86,10 +87,24 @@ class PuckArrange:
                 Y, X = np.mgrid[0:self.blockSize,0:self.blockSize]
                 halfBlock = int(self.blockSize/2)
                 dist2 = (Y - halfBlock) ** 2 # vertical rectangle
-                if np.random.rand() < 0.5:
-                    dist2 = ndimage.rotate(dist2+0.01,90,reshape=False)
-#                    dist2 = ndimage.rotate(dist2+0.01,45,reshape=False)
-                    dist2 = dist2 + (dist2==0)*np.max(dist2)
+                randNum = np.random.rand()
+#                randNum = np.random.rand() * 0.5
+                if randNum < 0.25:
+#                    dist2 = dist2+0.01
+                    dist2 = ndimage.rotate(dist2+0.01,45,reshape=False)
+                elif randNum < 0.5:
+#                    dist2 = dist2+0.01
+                    dist2 = ndimage.rotate(dist2+0.01,45,reshape=False)
+                elif randNum < 0.75:
+#                    dist2 = ndimage.rotate(dist2+0.01,90,reshape=False)
+                    dist2 = ndimage.rotate(dist2+0.01,135,reshape=False)
+                elif randNum < 1.01:
+#                    dist2 = ndimage.rotate(dist2+0.01,90,reshape=False)
+                    dist2 = ndimage.rotate(dist2+0.01,135,reshape=False)
+                else:
+                    print("error!")
+
+                dist2 = dist2 + (dist2==0)*np.max(dist2)
                 radius = np.random.randint(minRadius,maxRadius)
                 im = np.int32(dist2 < radius**2)
                 self.blocks.append(np.reshape(im,int(self.blockSize**2)))
@@ -144,57 +159,80 @@ class PuckArrange:
         halfSide = self.blockSize/2
 
         # if PICK
-#        if action < self.num_moves:
         if action < self.num_moves * self.num_orientations:
             
             position = action % self.num_moves
             orientation = action / self.num_moves
+            if orientation == 0:
+                orientation = 1
+            if orientation == 2:
+                orientation = 3
             
             # if not holding anything
             if self.state[1] == 0:
                 ii = coords[0,position]
                 jj = coords[1,position]
 
-                iiRangeOuter, jjRangeOuter = np.meshgrid(range(ii-halfSide,ii+halfSide),range(jj-halfSide,jj+halfSide))
-#                if np.sum(self.state[0][jjRangeOuter,iiRangeOuter,0]) > 0:
-#                    im = self.state[0][jjRangeOuter,iiRangeOuter,0]
+                jjRangeOuter, iiRangeOuter = np.meshgrid(range(jj-halfSide,jj+halfSide),range(ii-halfSide,ii+halfSide))
                 if np.sum(self.state[0][iiRangeOuter,jjRangeOuter,0]) > 0:
                     im = self.state[0][iiRangeOuter,jjRangeOuter,0]
-                    if orientation == 1:
-                        imRot = np.int32(ndimage.rotate(im, 90, reshape=False)>0.5)
-#                        imRot = np.int32(ndimage.rotate(im, 45, reshape=False)>0.5)
-                    else:
+                    
+                    if orientation == 0:
                         imRot = np.int32(im>0.5)
+                    elif orientation == 1:
+                        imRot = np.int32(ndimage.rotate(im, 45, reshape=False)>0.5)
+                    elif orientation == 2:
+                        imRot = np.int32(ndimage.rotate(im, 90, reshape=False)>0.5)
+                    elif orientation == 3:
+                        imRot = np.int32(ndimage.rotate(im, 135, reshape=False)>0.5)
+                    else:
+                        print("error in orientation 1")
+                    
+#                    if orientation == 1:
+##                        imRot = np.int32(ndimage.rotate(im, 90, reshape=False)>0.5)
+#                        imRot = np.int32(ndimage.rotate(im, 45, reshape=False)>0.5)
+#                    else:
+#                        imRot = np.int32(im>0.5)
+                        
 #                    imRot = im # comment out this line to use rotation
                     shape = np.shape(imRot)
-                    iiGap, jjGap = np.meshgrid(np.r_[range(0,self.gap), range(shape[0]-self.gap,shape[0])], range(0,shape[0]))
+                    jjGap, iiGap = np.meshgrid(np.r_[range(0,self.gap), range(shape[0]-self.gap,shape[0])], range(0,shape[0]))
                     if np.sum(imRot[iiGap,jjGap]) < 1:
                         self.holdingImage = imRot
                         self.state[1] = 1 # set holding to contents of action target
                         self.state[0][iiRangeOuter,jjRangeOuter,0] = np.zeros([np.shape(iiRangeOuter)[0],np.shape(iiRangeOuter)[1]])
 
         # if PLACE
-#        elif action < 2*self.num_moves:
         elif action < 2 * self.num_moves * self.num_orientations:
             
             action -= self.num_moves * self.num_orientations
             position = action % self.num_moves
             orientation = action / self.num_moves
-
+            if orientation == 0:
+                orientation = 1
+            if orientation == 2:
+                orientation = 3
+            
             if self.state[1] != 0:
                 
                 ii = coords[0,position]
                 jj = coords[1,position]
                 
-                iiRangeOuter, jjRangeOuter = np.meshgrid(range(ii-halfSide,ii+halfSide),range(jj-halfSide,jj+halfSide))
+                jjRangeOuter, iiRangeOuter = np.meshgrid(range(jj-halfSide,jj+halfSide),range(ii-halfSide,ii+halfSide))
                 
                 if True not in (self.state[0][iiRangeOuter,jjRangeOuter,0] > 0): # if this square is empty
                     im = self.holdingImage
-                    if orientation == 1:
-                        imRot = ndimage.rotate(im, -90, reshape=False)
-#                        imRot = ndimage.rotate(im, -45, reshape=False)
-                    else:
+                    if orientation == 0:
                         imRot = im
+                    elif orientation == 1:
+                        imRot = ndimage.rotate(im, -45, reshape=False)
+                    elif orientation == 2:
+                        imRot = ndimage.rotate(im, -90, reshape=False)
+                    elif orientation == 3:
+                        imRot = ndimage.rotate(im, -135, reshape=False)
+                    else:
+                        print("error in orientation 2")
+                        
 #                    imRot = im # comment out this line to use rotation
                     self.state[0][iiRangeOuter,jjRangeOuter,0] = imRot
 #                    self.state[0][jjRangeOuter,iiRangeOuter,0] = imRot
@@ -210,13 +248,20 @@ class PuckArrange:
         # check for two adjacent blocks
         if self.state[1] == 0: # if both objs on the grid
             
-            for ii in range(2):
+#            for ii in range(2):
+            for ii in range(4):
                 if ii == 0:
                     im = self.state[0][:,:,0]
-                else:
+                elif ii == 1:
                     im = ndimage.rotate(self.state[0][:,:,0],45,reshape=True)
+                elif ii == 2:
+                    im = ndimage.rotate(self.state[0][:,:,0],90,reshape=True)
+                elif ii == 3:
+                    im = ndimage.rotate(self.state[0][:,:,0],135,reshape=True)
+                else:
+                    print("error in orientation 3")
             
-                bounds = self.getBoundingBox(im)
+                bounds = self.getBoundingBox(np.int32(im>0.5))
                 
                 # Check for horizontal adjacency
                 if (bounds[1] - bounds[0]) < (self.blockSize*0.9): # require two blocks to be aligned and flat

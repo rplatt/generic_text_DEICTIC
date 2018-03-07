@@ -1,18 +1,21 @@
 #
-# Derived from testrob3_standalone.py
+# Three blocks. Can assign reward for either two blocks in a row or three blocks.
+#
+# Derived from blockarrange_2blocks.py
+#
+# 
 #
 import math
 import numpy as np
 import gym
 from gym import error, spaces, utils
-#from gym.utils import seeding
 
 class BlockArrange:
 
     def __init__(self):
         
         self.maxSide = 8
-        self.num_blocks = 2
+        self.num_blocks = 3
         self.num_moves = self.maxSide**2
         
         # 0 -- self.maxSide**2 -> pick from specified location
@@ -22,11 +25,14 @@ class BlockArrange:
         # Observations:
         # 0: block layout
         # 1: holding (0 (nothing), or block num)
-        self.observation_space = spaces.Tuple([spaces.Box(np.zeros([self.maxSide,self.maxSide,1]), 2.*np.ones([self.maxSide,self.maxSide,1])), spaces.Discrete(self.num_blocks)])
+        self.observation_space = spaces.Tuple([spaces.Box(np.zeros([self.maxSide,self.maxSide,1]), self.num_blocks*np.ones([self.maxSide,self.maxSide,1])), spaces.Discrete(self.num_blocks)])
+#        self.observation_space = spaces.Tuple([spaces.Box(np.zeros([self.maxSide,self.maxSide,1]), np.ones([self.maxSide,self.maxSide,1])), spaces.Discrete(2)])
             
         self.state = None
-#        self.max_episode = 50
         self.max_episode = 10
+        self.numBlocksInRowGoal = 2
+#        self.numBlocksInRowGoal = 3
+        self.pickBlockGoal = None
         
         self.reset()
 
@@ -40,12 +46,20 @@ class BlockArrange:
         
         # self.state[0] encodes block layout
         self.state.append(np.zeros(self.observation_space.spaces[0].shape))
-        for i in range(self.num_blocks):
+        
+        if np.random.rand() < 0.5:
+            blocksToCreate = [1,2,3]
+            self.pickBlockGoal = 1
+        else:
+            blocksToCreate = [1,2,4]
+            self.pickBlockGoal = 2
+
+        for i in blocksToCreate:
             while True:
                 ii = np.random.randint(shape[0])
                 jj = np.random.randint(shape[1])
                 if self.state[0][ii,jj] == 0:
-                    self.state[0][ii,jj] = i+1.
+                    self.state[0][ii,jj] = i
                     break
 
         # self.state[1] encodes what the robot is holding -- start out holding nothing (0)
@@ -56,16 +70,14 @@ class BlockArrange:
     
     
     def step(self, action):
-        
-        posBlocks = -np.ones([self.num_blocks,2])
-        
+                
         X,Y = np.meshgrid(range(self.maxSide),range(self.maxSide))
         coords = np.stack([np.reshape(Y,[self.maxSide**2,]), np.reshape(X,[self.maxSide**2,])],axis=0)
 
         # if PICK
         if action < self.num_moves:
             
-            # if not already holding something
+            # if not holding anything
             if self.state[1] == 0:
             
                 # set holding to contents of action target
@@ -77,7 +89,7 @@ class BlockArrange:
         # if PLACE
         elif action < 2*self.num_moves:
             
-            action -= self.maxSide**2
+            action -= self.num_moves
             
             # if holding something and spot is free, then place
             if (self.state[1] != 0) and (self.state[0][coords[0,action],coords[1,action]] == 0):
@@ -88,25 +100,37 @@ class BlockArrange:
                 # set holding to zero
                 self.state[1] = 0
             
-        else:
-            print("error")
-
-        # locate new block positions
-        for i in range(self.num_blocks):
-            if np.sum(self.state[0] == i+1) > 0: # if this block exists on the board
-                posBlocks[i,:] = np.squeeze(np.nonzero(self.state[0] == i+1))[0:2]
-
         # check for termination condition
-        reward = -1
-#        reward = 0
+        reward = 0
         done = 0
-        if posBlocks[0,0] == posBlocks[1,0]:
-            if np.abs(posBlocks[0,1] - posBlocks[1,1]) <= 1:
-                done = 1
-                reward = 0
-#                reward = 10
-                
         
+#        # three-block adjacency condition
+#        gridOnes = np.int32(self.state[0][:,:,0]>0)
+#        numBlocksInEachRow = np.sum(gridOnes,axis=1)
+#        if np.max(numBlocksInEachRow) >= self.numBlocksInRowGoal: # if at least self.numBlocksInRowGoal blocks adjacent
+#            rowNum = np.squeeze(np.nonzero(numBlocksInEachRow>=2))
+#            row = gridOnes[rowNum,:]
+#            if self.numBlocksInRowGoal == 2:
+#                rowRolled = np.roll(row,1)
+#                rowRolled[0] = 0
+#                if np.sum(row + rowRolled >= 2) > 0: # if at least two blocks adjacent
+#                    done = 1
+#                    reward = 10
+#            elif self.numBlocksInRowGoal == 3: # if at least three blocks adjacent
+#                if (np.max(np.nonzero(row)) - np.min(np.nonzero(row))) == 2:
+#                    done = 1
+#                    reward = 10
+#            else:
+#                print("error!!!!")
+
+#        if self.state[1] > 0:
+#        if self.state[1] > 2:
+        if self.state[1] == self.pickBlockGoal:
+            done = 1
+            reward = 10
+#            if self.state[1] == self.pickBlockGoal:
+#                reward = 10
+
         if self.episode_timer > self.max_episode:
             self.episode_timer = 0
             done = 1
@@ -117,7 +141,8 @@ class BlockArrange:
     
     def render(self):
         
-        print("state:")
-        print(str(np.reshape(self.state,np.shape(self.state)[0:2])))
+        print("grid:")
+        print(str(self.state[0][:,:,0]))
+        print("holding: " + str(self.state[1]))
 
         

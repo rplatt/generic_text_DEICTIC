@@ -1,5 +1,7 @@
 #
-# Derived from testrob3_standalone.py
+# Derived from blockarrange1_standalone.py
+#
+# This version of the code gives reward of +10 when successful. OW zero reward.
 #
 import math
 import numpy as np
@@ -77,7 +79,7 @@ class BlockArrange:
         # if PLACE
         elif action < 2*self.num_moves:
             
-            action -= self.maxSide**2
+            action -= self.num_moves
             
             # if holding something and spot is free, then place
             if (self.state[1] != 0) and (self.state[0][coords[0,action],coords[1,action]] == 0):
@@ -97,14 +99,14 @@ class BlockArrange:
                 posBlocks[i,:] = np.squeeze(np.nonzero(self.state[0] == i+1))[0:2]
 
         # check for termination condition
-        reward = -1
-#        reward = 0
+#        reward = -1
+        reward = 0
         done = 0
         if posBlocks[0,0] == posBlocks[1,0]:
             if np.abs(posBlocks[0,1] - posBlocks[1,1]) <= 1:
                 done = 1
-                reward = 0
-#                reward = 10
+#                reward = 0
+                reward = 10
                 
         
         if self.episode_timer > self.max_episode:

@@ -1,5 +1,7 @@
 #
-# Derived from testrob3_standalone.py
+# Derived from blockarrange1_standalone.py
+#
+# This version of the code imposes a unit cost structure (-1 reward on every time step)
 #
 import math
 import numpy as np
@@ -77,7 +79,7 @@ class BlockArrange:
         # if PLACE
         elif action < 2*self.num_moves:
             
-            action -= self.maxSide**2
+            action -= self.num_moves
             
             # if holding something and spot is free, then place
             if (self.state[1] != 0) and (self.state[0][coords[0,action],coords[1,action]] == 0):

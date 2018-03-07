@@ -104,22 +104,26 @@ def build_getMoveActionDescriptors(make_obs_ph,actionShape,actionShapeSmall,stri
     observations_ph = U.ensure_tf_input(make_obs_ph("observation"))
     obs = observations_ph.get()
     shape = tf.shape(obs)
-    deicticPad = np.int32(2*np.floor(np.array(actionShape)/3))
+    actionShapeOneThird = np.int32((np.array(actionShape) * np.sqrt(2) + 1) / 3)
+    actionShapeExpanded = 3 * actionShapeOneThird
+#    deicticPad = np.int32(2*np.floor(np.array(actionShape)/3))
+    deicticPad = 2 * actionShapeOneThird
     obsZeroPadded = tf.image.resize_image_with_crop_or_pad(obs,shape[1]+deicticPad[0],shape[2]+deicticPad[1])
     patches = tf.extract_image_patches(
             obsZeroPadded,
-#            obs,
-            ksizes=[1, actionShape[0], actionShape[1], 1],
-#            strides=[1, deicticPad[0]/2, deicticPad[1]/2, 1],
+#            ksizes=[1, actionShape[0], actionShape[1], 1],
+            ksizes=[1, actionShapeExpanded[0], actionShapeExpanded[1], 1],
             strides=[1, stride, stride, 1], 
             rates=[1, 1, 1, 1], 
             padding='VALID')
     patchesShape = tf.shape(patches)
-    patchesTiled = tf.reshape(patches,[patchesShape[0]*patchesShape[1]*patchesShape[2],actionShape[0],actionShape[1],1])
+#    patchesTiled = tf.reshape(patches,[patchesShape[0]*patchesShape[1]*patchesShape[2],actionShape[0],actionShape[1],1])
+    patchesTiled = tf.reshape(patches,[patchesShape[0]*patchesShape[1]*patchesShape[2],actionShapeExpanded[0],actionShapeExpanded[1],1])
     patchesTiledSmall = tf.image.resize_images(patchesTiled, [actionShapeSmall[0], actionShapeSmall[1]])
     patchesTiledSmall = tf.reshape(patchesTiledSmall,[-1,actionShapeSmall[0],actionShapeSmall[1]])
 
-    getMoveActionDescriptors = U.function(inputs=[observations_ph], outputs=patchesTiledSmall)
+#    getMoveActionDescriptors = U.function(inputs=[observations_ph], outputs=patchesTiledSmall)
+    getMoveActionDescriptors = U.function(inputs=[observations_ph], outputs=[obsZeroPadded, patches])
     return getMoveActionDescriptors
 
 
@@ -283,7 +287,8 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
     for t in range(max_timesteps):
         
         # Get action set: <num_patches> pick actions followed by <num_patches> place actions
-        moveDescriptors = getMoveActionDescriptors([obs[0]])
+#        moveDescriptors = getMoveActionDescriptors([obs[0]])
+        obsZeroPadded, patches = getMoveActionDescriptors([obs[0]])
         moveDescriptors = moveDescriptors*2-1
         actionsPickDescriptors = np.stack([moveDescriptors, np.zeros(np.shape(moveDescriptors))],axis=3)
         actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptors)),moveDescriptors],axis=3)
@@ -409,8 +414,8 @@ if len(sys.argv) == 6:
 else:
 #    envStride = 28
 #    envStride = 7
-    initEnvStride = 2
-    envStride = 2
+    initEnvStride = 28
+    envStride = 28
     fileIn = 'None'
     fileOut = 'None'
 #    fileOut = './whatilearned28'
@@ -421,3 +426,4 @@ main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps)
     
 #if __name__ == '__main__':
 #    main()
+

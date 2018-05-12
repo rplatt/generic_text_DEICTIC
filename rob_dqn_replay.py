@@ -89,12 +89,12 @@ def build_targetTrain(make_obs_ph,
 def main():
 
     # ********* Commonly used options. *************
-    buffer_size=1
-    batch_size=1
+    buffer_size=1000
+    batch_size=32
 #    valueFunctionType = "TABULAR"
     valueFunctionType = "DQN"
-#    prioritized_replay=True
-    prioritized_replay=False
+    prioritized_replay=True
+#    prioritized_replay=False
     # ********* *********************** *************
     
     np.set_printoptions(formatter={'float_kind':lambda x: "%.2f" % x})
@@ -138,7 +138,8 @@ def main():
 
 
 
-    max_timesteps=100000
+#    max_timesteps=100000
+    max_timesteps=30000
     exploration_fraction=0.3
     exploration_final_eps=0.02
     print_freq=1
@@ -240,7 +241,8 @@ def main():
         # take action
         nextState, rew, done, _ = env.step(action)
 
-        replay_buffer.add(state, action, rew, nextState, float(done))
+#        replay_buffer.add(state, action, rew, nextState, float(done))
+        replay_buffer.add(np.copy(state), np.copy(action), np.copy(rew), np.copy(nextState), np.copy(float(done)))
 
         if t > learning_starts and t % train_freq == 0:
 

@@ -26,14 +26,25 @@ from replay_buffer8 import ReplayBuffer, PrioritizedReplayBuffer
 from schedules import LinearSchedule
 import matplotlib.pyplot as plt
 import copy as cp
+import scipy.misc as spm
 
 # Two disks placed in a 224x224 image. Disks placed randomly initially. 
 # Reward given when the pucks are placed adjacent. Agent must learn to pick
 # up one of the disks and place it next to the other.
-import envs.puckarrange_env2 as envstandalone
+import envs.puckarrange_env2_baseline1 as envstandalone
 
 
 # **** Make tensorflow functions ****
+
+def build_getq_fullstate(make_fullImage_ph, q_func, num_actions, num_cascade, scope="deepq", qscope="q_func", reuse=None):
+
+    with tf.variable_scope(scope, reuse=reuse):
+        state_ph = U.ensure_tf_input(make_fullImage_ph("state"))
+        q_values = q_func(state_ph.get(), num_actions, scope=qscope)
+        getq = U.function(inputs=[state_ph], outputs=q_values)
+        return getq
+    
+    
 
 # Evaluate the q function for a given input.
 def build_getq(make_actionDeic_ph, q_func, num_states, num_cascade, scope="deepq", qscope="q_func", reuse=None):
@@ -141,8 +152,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
     # Standard q-learning parameters
     reuseModels = None
     max_timesteps=inputmaxtimesteps
-#    exploration_fraction=0.3
-    exploration_fraction=1
+    exploration_fraction=0.3
     exploration_final_eps=0.1
     gamma=.90
     num_cpu = 16
@@ -150,7 +160,8 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
     # Used by buffering and DQN
     learning_starts=60
     buffer_size=1000
-    batch_size=32
+#    batch_size=32
+    batch_size=10
     target_network_update_freq=1
     train_freq=1
     print_freq=1
@@ -164,6 +175,9 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
     num_states = 2 # either holding or not
     num_patches = len(env.moveCenters)**2
     num_actions = 2*num_patches
+
+    # needed for baseline
+    fullImageSize = (60,60)
 
     # Create the schedule for exploration starting from 1.
     exploration = LinearSchedule(schedule_timesteps=int(exploration_fraction * max_timesteps),
@@ -210,6 +224,9 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
     def make_weight_ph(name):
         return U.BatchInput([1], name=name)
 
+    def make_fullImage_ph(name):
+        return U.BatchInput(fullImageSize, name=name)
+
     getMoveActionDescriptors = build_getMoveActionDescriptors(make_obs_ph=make_obs_ph,actionShape=descriptorShape,actionShapeSmall=descriptorShapeSmall,stride=env.stride)
     
     getqNotHolding = build_getq(
@@ -231,6 +248,17 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
             reuse=reuseModels
             )
 
+    getqFullState = build_getq_fullstate(
+            make_fullImage_ph=make_fullImage_ph,
+            q_func=q_func,
+            num_actions=num_actions,
+            num_cascade=1,
+            scope="deepq",
+            qscope="q_func_fullstate",
+            reuse=reuseModels
+            )
+
+    
     targetTrainNotHolding = build_targetTrain(
         make_actionDeic_ph=make_actionDeic_ph,
         make_target_ph=make_target_ph,
@@ -283,6 +311,10 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
     # Iterate over time steps
     for t in range(max_timesteps):
         
+        # resize state image
+        imState = spm.imresize(obs[0][:,:,0],fullImageSize)
+        qCurrFullState = np.squeeze(getqFullState([imState]))
+        
         # Get action set: <num_patches> pick actions followed by <num_patches> place actions
         moveDescriptors = getMoveActionDescriptors([obs[0]])
         moveDescriptors = moveDescriptors*2-1
@@ -296,14 +328,15 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
         qCurrNotHoldingPlace = getqNotHolding(actionsPlaceDescriptors)
         qCurrHoldingPlace = getqHolding(actionsPlaceDescriptors)
         qCurr = np.concatenate([np.r_[qCurrNotHoldingPick,qCurrNotHoldingPlace],np.r_[qCurrHoldingPick,qCurrHoldingPlace]],axis=1)
-
+        qCurrThisState = qCurr[:,obs[1]]
+        
         # Update tabular state-value function using V(s) = max_a Q(s,a)
-        thisStateValues = np.max(qCurr[:,obs[1]])
+        thisStateValues = np.max(qCurrThisState)
         V[obs[1]] = (1-lrState) * V[obs[1]] + lrState * thisStateValues
 
         # Select e-greedy action to execute
-        qCurrNoise = qCurr + np.random.random(np.shape(qCurr))*0.01 # add small amount of noise to break ties randomly
-        action = np.argmax(qCurrNoise[:,obs[1]])
+        qCurrNoise = qCurrThisState + np.random.random(np.shape(qCurrThisState))*0.01 # add small amount of noise to break ties randomly
+        action = np.argmax(qCurrNoise)
         if np.random.rand() < exploration.value(t):
             action = np.random.randint(num_actions)
 
@@ -358,10 +391,6 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
         
         obs = np.copy(new_obs)
 
-    # save learning curve
-    filename = 'PA2_deictic_rewards_' +str(num_patches) + "_" + str(max_timesteps) + '.dat'
-    np.savetxt(filename,episode_rewards)
-
     # save what we learned
     if fileOut != "None":
         saver = tf.train.Saver()
@@ -370,40 +399,40 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
         print("fileOutV: " + fileOutV)
         np.save(fileOutV,V)
 
-#    # display value function
-#    obs = env.reset()
-#    moveDescriptors = getMoveActionDescriptors([obs[0]])
-#    moveDescriptors = moveDescriptors*2-1
-#    gridSize = np.int32(np.sqrt(np.shape(moveDescriptors)[0]))
-#
-#    actionsPickDescriptors = np.stack([moveDescriptors, np.zeros(np.shape(moveDescriptors))],axis=3)
-#    actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptors)), moveDescriptors],axis=3)
-#    
-#    print(str(obs[0][:,:,0]))
-#    
-#    qPickNotHolding = getqNotHolding(actionsPickDescriptors)
-#    qPickHolding = getqHolding(actionsPickDescriptors)
-#    qPick = np.concatenate([qPickNotHolding,qPickHolding],axis=1)
-#    print("Value function for pick action in hold-nothing state:")
-#    print(str(np.reshape(qPick[:,0],[gridSize,gridSize])))
-#    print("Value function for pick action in hold-1 state:")
-#    print(str(np.reshape(qPick[:,1],[gridSize,gridSize])))
-#
-#    qPlaceNotHolding = getqNotHolding(actionsPlaceDescriptors)
-#    qPlaceHolding = getqHolding(actionsPlaceDescriptors)
-#    qPlace = np.concatenate([qPlaceNotHolding,qPlaceHolding],axis=1)
-#    print("Value function for place action in hold-nothing state:")
-#    print(str(np.reshape(qPlace[:,0],[gridSize,gridSize])))
-#    print("Value function for place action in hold-1 state:")
-#    print(str(np.reshape(qPlace[:,1],[gridSize,gridSize])))
-#    
-#    plt.subplot(1,3,1)
-#    plt.imshow(np.tile(env.state[0],[1,1,3]))
-#    plt.subplot(1,3,2)
-#    plt.imshow(np.reshape(qPick[:,0],[gridSize,gridSize]))
-#    plt.subplot(1,3,3)
-#    plt.imshow(np.reshape(qPlace[:,1],[gridSize,gridSize]))
-#    plt.show()
+    # display value function
+    obs = env.reset()
+    moveDescriptors = getMoveActionDescriptors([obs[0]])
+    moveDescriptors = moveDescriptors*2-1
+    gridSize = np.int32(np.sqrt(np.shape(moveDescriptors)[0]))
+
+    actionsPickDescriptors = np.stack([moveDescriptors, np.zeros(np.shape(moveDescriptors))],axis=3)
+    actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptors)), moveDescriptors],axis=3)
+    
+    print(str(obs[0][:,:,0]))
+    
+    qPickNotHolding = getqNotHolding(actionsPickDescriptors)
+    qPickHolding = getqHolding(actionsPickDescriptors)
+    qPick = np.concatenate([qPickNotHolding,qPickHolding],axis=1)
+    print("Value function for pick action in hold-nothing state:")
+    print(str(np.reshape(qPick[:,0],[gridSize,gridSize])))
+    print("Value function for pick action in hold-1 state:")
+    print(str(np.reshape(qPick[:,1],[gridSize,gridSize])))
+
+    qPlaceNotHolding = getqNotHolding(actionsPlaceDescriptors)
+    qPlaceHolding = getqHolding(actionsPlaceDescriptors)
+    qPlace = np.concatenate([qPlaceNotHolding,qPlaceHolding],axis=1)
+    print("Value function for place action in hold-nothing state:")
+    print(str(np.reshape(qPlace[:,0],[gridSize,gridSize])))
+    print("Value function for place action in hold-1 state:")
+    print(str(np.reshape(qPlace[:,1],[gridSize,gridSize])))
+    
+    plt.subplot(1,3,1)
+    plt.imshow(np.tile(env.state[0],[1,1,3]))
+    plt.subplot(1,3,2)
+    plt.imshow(np.reshape(qPick[:,0],[gridSize,gridSize]))
+    plt.subplot(1,3,3)
+    plt.imshow(np.reshape(qPlace[:,1],[gridSize,gridSize]))
+    plt.show()
 
 if len(sys.argv) == 6:
     initEnvStride = np.int32(sys.argv[1])
@@ -414,8 +443,8 @@ if len(sys.argv) == 6:
 else:
 #    envStride = 28
 #    envStride = 7
-    initEnvStride = 2
-    envStride = 2
+    initEnvStride = 28
+    envStride = 28
     fileIn = 'None'
     fileOut = 'None'
 #    fileOut = './whatilearned28'

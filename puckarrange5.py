@@ -1,17 +1,9 @@
 #
-# Here, I solve a pick and place task involving disks of various diameters using
-# the deictic action method. Essentially, we have a large action branching factor.
-# The state representation is just a single bit indicating whether the object
-# is held in the hand or not. The optimal policy is only two time steps long.
+# Here, I add diagonal and vertical rewards.
 #
-# This version uses a state value function *and* an action value function to speed up 
-# learning for the large action branching factor.
+# Adapted from puckarrange2.py
 #
-# Adapted from puckarrange1.py
-#
-# Results: After I fixed a memory leak, I think this code is working well. I can
-#          learn the full sequence of seven learning tasks (see puckarrange_iter1.py)
-#          in a total of 13 minutes on a machine w/ a single nvidia 1080.
+# Results: works just fine at multiple resolutions (28, 14, 7)
 #
 #
 import sys as sys
@@ -30,7 +22,7 @@ import copy as cp
 # Two disks placed in a 224x224 image. Disks placed randomly initially. 
 # Reward given when the pucks are placed adjacent. Agent must learn to pick
 # up one of the disks and place it next to the other.
-import envs.puckarrange_env2 as envstandalone
+import envs.puckarrange_env5 as envstandalone
 
 
 # **** Make tensorflow functions ****
@@ -141,8 +133,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
     # Standard q-learning parameters
     reuseModels = None
     max_timesteps=inputmaxtimesteps
-#    exploration_fraction=0.3
-    exploration_fraction=1
+    exploration_fraction=0.5
     exploration_final_eps=0.1
     gamma=.90
     num_cpu = 16
@@ -358,10 +349,6 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
         
         obs = np.copy(new_obs)
 
-    # save learning curve
-    filename = 'PA2_deictic_rewards_' +str(num_patches) + "_" + str(max_timesteps) + '.dat'
-    np.savetxt(filename,episode_rewards)
-
     # save what we learned
     if fileOut != "None":
         saver = tf.train.Saver()
@@ -370,40 +357,36 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
         print("fileOutV: " + fileOutV)
         np.save(fileOutV,V)
 
-#    # display value function
-#    obs = env.reset()
-#    moveDescriptors = getMoveActionDescriptors([obs[0]])
-#    moveDescriptors = moveDescriptors*2-1
-#    gridSize = np.int32(np.sqrt(np.shape(moveDescriptors)[0]))
-#
-#    actionsPickDescriptors = np.stack([moveDescriptors, np.zeros(np.shape(moveDescriptors))],axis=3)
-#    actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptors)), moveDescriptors],axis=3)
-#    
-#    print(str(obs[0][:,:,0]))
-#    
-#    qPickNotHolding = getqNotHolding(actionsPickDescriptors)
-#    qPickHolding = getqHolding(actionsPickDescriptors)
-#    qPick = np.concatenate([qPickNotHolding,qPickHolding],axis=1)
-#    print("Value function for pick action in hold-nothing state:")
-#    print(str(np.reshape(qPick[:,0],[gridSize,gridSize])))
-#    print("Value function for pick action in hold-1 state:")
-#    print(str(np.reshape(qPick[:,1],[gridSize,gridSize])))
-#
-#    qPlaceNotHolding = getqNotHolding(actionsPlaceDescriptors)
-#    qPlaceHolding = getqHolding(actionsPlaceDescriptors)
-#    qPlace = np.concatenate([qPlaceNotHolding,qPlaceHolding],axis=1)
-#    print("Value function for place action in hold-nothing state:")
-#    print(str(np.reshape(qPlace[:,0],[gridSize,gridSize])))
-#    print("Value function for place action in hold-1 state:")
-#    print(str(np.reshape(qPlace[:,1],[gridSize,gridSize])))
-#    
-#    plt.subplot(1,3,1)
-#    plt.imshow(np.tile(env.state[0],[1,1,3]))
-#    plt.subplot(1,3,2)
-#    plt.imshow(np.reshape(qPick[:,0],[gridSize,gridSize]))
-#    plt.subplot(1,3,3)
-#    plt.imshow(np.reshape(qPlace[:,1],[gridSize,gridSize]))
-#    plt.show()
+    # display value function
+    obs = env.reset()
+    moveDescriptors = getMoveActionDescriptors([obs[0]])
+    moveDescriptors = moveDescriptors*2-1
+    gridSize = np.int32(np.sqrt(np.shape(moveDescriptors)[0]))
+
+    actionsPickDescriptors = np.stack([moveDescriptors, np.zeros(np.shape(moveDescriptors))],axis=3)
+    actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptors)), moveDescriptors],axis=3)
+    
+    print(str(obs[0][:,:,0]))
+    
+    qPickNotHolding = getqNotHolding(actionsPickDescriptors)
+    qPickHolding = getqHolding(actionsPickDescriptors)
+    qPick = np.concatenate([qPickNotHolding,qPickHolding],axis=1)
+    print("Value function for pick action in hold-nothing state:")
+    print(str(np.reshape(qPick[:,0],[gridSize,gridSize])))
+
+    qPlaceNotHolding = getqNotHolding(actionsPlaceDescriptors)
+    qPlaceHolding = getqHolding(actionsPlaceDescriptors)
+    qPlace = np.concatenate([qPlaceNotHolding,qPlaceHolding],axis=1)
+    print("Value function for place action in hold-1 state:")
+    print(str(np.reshape(qPlace[:,1],[gridSize,gridSize])))
+    
+    plt.subplot(1,3,1)
+    plt.imshow(np.tile(env.state[0],[1,1,3]),vmin=5,vmax=12)
+    plt.subplot(1,3,2)
+    plt.imshow(np.reshape(qPick[:,0],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(1,3,3)
+    plt.imshow(np.reshape(qPlace[:,1],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.show()
 
 if len(sys.argv) == 6:
     initEnvStride = np.int32(sys.argv[1])
@@ -412,11 +395,10 @@ if len(sys.argv) == 6:
     fileOut = sys.argv[4]
     inputmaxtimesteps = np.int32(sys.argv[5])
 else:
-#    envStride = 28
-#    envStride = 7
-    initEnvStride = 2
-    envStride = 2
-    fileIn = 'None'
+    initEnvStride = 28
+    envStride = 28
+#    fileIn = 'None'
+    fileIn = './disk_a'
     fileOut = 'None'
 #    fileOut = './whatilearned28'
     inputmaxtimesteps = 2000

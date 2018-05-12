@@ -29,6 +29,7 @@
 # Also: this version can work for a three block in a row scenario. In that case, it
 #       converges to averaged values for the first or second pick operation.
 #
+import sys as sys
 import gym
 import numpy as np
 import time as time
@@ -39,8 +40,8 @@ import models as models
 from replay_buffer2 import ReplayBuffer, PrioritizedReplayBuffer
 from schedules import LinearSchedule
 
-#import envs.blockarrange_2blocks as envstandalone
-import envs.blockarrange_3blocks as envstandalone
+import envs.blockarrange_2blocks as envstandalone
+#import envs.blockarrange_3blocks as envstandalone
 
 # **** Make tensorflow functions ****
 
@@ -130,7 +131,7 @@ def build_getMoveActionDescriptors(make_obs_ph,deicticShape):
 
 
 
-def main():
+def main(max_timesteps):
     
     np.set_printoptions(formatter={'float_kind':lambda x: "%.2f" % x})
 
@@ -166,16 +167,17 @@ def main():
     env = envstandalone.BlockArrange()
 
     # Standard q-learning parameters
-    max_timesteps=8000
-    exploration_fraction=0.3
+#    max_timesteps=8000
+#    exploration_fraction=0.3
+    exploration_fraction=1
     exploration_final_eps=0.1
     gamma=.90
     num_cpu = 16
 
     # Used by buffering and DQN
     learning_starts=10
-    buffer_size=1000
-    batch_size=32
+    buffer_size=10000
+    batch_size=10
     target_network_update_freq=1
     train_freq=1
     print_freq=1
@@ -189,8 +191,8 @@ def main():
     num_actions_discrete = 2
 #    valueFunctionType = "TABULAR"
     valueFunctionType = "DQN"
-#    actionSelectionStrategy = "UNIFORM_RANDOM" # actions are selected randomly from collection of all actions
-    actionSelectionStrategy = "RANDOM_UNIQUE" # each unique action descriptor has equal chance of being selected
+    actionSelectionStrategy = "UNIFORM_RANDOM" # actions are selected randomly from collection of all actions
+#    actionSelectionStrategy = "RANDOM_UNIQUE" # each unique action descriptor has equal chance of being selected
 
     episode_rewards = [0.0]
     
@@ -406,6 +408,9 @@ def main():
         
         obs = np.copy(new_obs)
 
+    # save learning curve
+    filename = 'BAR2_deictic_rewards_' +str(num_patches) + "_" + str(max_timesteps) + '.dat'
+    np.savetxt(filename,episode_rewards)
 
     # display value function
     obs = env.reset()
@@ -441,6 +446,13 @@ def main():
     
 
 
-if __name__ == '__main__':
-    main()
+if len(sys.argv) == 2:
+    max_timesteps = np.int32(sys.argv[1])
+else:
+    max_timesteps = 50000
+
+main(max_timesteps)
+
+#if __name__ == '__main__':
+#    main()
 

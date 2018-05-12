@@ -1,15 +1,12 @@
 #
-# This version has 4 orientations. 
+# This version uses a cascaded value function for NoRot
 #
-# 
+# Adapted from puckarrange12.py
 #
-# Adapted from puckarrange2.py
+# Results: I don't think the cascade helps. I'm still trying to verify this,
+#          but, I think just a single level (num_cascade=1) works best...
 #
-# Results: I notice that in order to learn to flat-align blocks, I need to increase
-#          the resolution from 20 to 25. W/ just 20, it doesn't really get to peak performance.
 #
-#          Works just fine for 28x28, but even disks don't work for 14x14. I'm 
-#          going to check this out in puckarrange4...
 #
 import sys as sys
 import gym
@@ -18,8 +15,8 @@ import time as time
 import tensorflow as tf
 import tf_util_rob as U
 import models as models
-#from replay_buffer2 import ReplayBuffer, PrioritizedReplayBuffer
-from replay_buffer8 import ReplayBuffer, PrioritizedReplayBuffer
+#from replay_buffer8 import ReplayBuffer, PrioritizedReplayBuffer
+from replay_buffer9 import ReplayBuffer, PrioritizedReplayBuffer
 from schedules import LinearSchedule
 import matplotlib.pyplot as plt
 import copy as cp
@@ -27,8 +24,7 @@ import copy as cp
 # Two disks placed in a 224x224 image. Disks placed randomly initially. 
 # Reward given when the pucks are placed adjacent. Agent must learn to pick
 # up one of the disks and place it next to the other.
-#import envs.puckarrange_env2 as envstandalone
-import envs.puckarrange_env3 as envstandalone
+import envs.puckarrange_env13 as envstandalone
 
 
 # **** Make tensorflow functions ****
@@ -38,9 +34,14 @@ def build_getq(make_actionDeic_ph, q_func, num_states, num_cascade, scope="deepq
 
     with tf.variable_scope(scope, reuse=reuse):
         actions_ph = U.ensure_tf_input(make_actionDeic_ph("actions"))
-        q_values = q_func(actions_ph.get(), 1, scope=qscope)
-        getq = U.function(inputs=[actions_ph], outputs=q_values)
+#        q_values = q_func(actions_ph.get(), 1, scope=qscope)
+#        getq = U.function(inputs=[actions_ph], outputs=q_values)
+        q_values = q_func(actions_ph.get(), num_cascade, scope=qscope)
+        q_valuesTiled = tf.reshape(q_values,[-1,num_cascade])
+        getq = U.function(inputs=[actions_ph], outputs=q_valuesTiled)
         return getq
+
+
 
 # Train q-function
 def build_targetTrain(make_actionDeic_ph,
@@ -61,14 +62,16 @@ def build_targetTrain(make_actionDeic_ph,
         obs_t_input = U.ensure_tf_input(make_actionDeic_ph("action_t_deic"))
         target_input = U.ensure_tf_input(make_target_ph("target"))
         importance_weights_ph = U.ensure_tf_input(make_weight_ph("target"))
-    
+
         # get variables
         q_func_vars = U.scope_vars(U.absolute_scope_name(qscope))
     
         # q values for all actions
-        q_t_raw = q_func(obs_t_input.get(), 1, scope=qscope, reuse=True)
-        targetTiled = tf.reshape(target_input.get(), shape=(-1,1))
-        
+#        q_t_raw = q_func(obs_t_input.get(), 1, scope=qscope, reuse=True)
+#        targetTiled = tf.reshape(target_input.get(), shape=(-1,1))
+        q_t_raw = q_func(obs_t_input.get(), num_cascade, scope=qscope, reuse=True)
+        targetTiled = tf.reshape(target_input.get(), shape=(-1,num_cascade))
+
         # calculate error
         td_error = q_t_raw - tf.stop_gradient(targetTiled)
         errors = importance_weights_ph.get() * U.huber_loss(td_error)
@@ -94,7 +97,6 @@ def build_targetTrain(make_actionDeic_ph,
     
         return targetTrain
 
-
 # Get candidate move descriptors given an input image. Candidates are found by
 # sliding a window over the image with the given stride (same stride applied both 
 # in x and y)
@@ -107,9 +109,7 @@ def build_getMoveActionDescriptors(make_obs_ph,actionShape,actionShapeSmall,stri
     obsZeroPadded = tf.image.resize_image_with_crop_or_pad(obs,shape[1]+deicticPad[0],shape[2]+deicticPad[1])
     patches = tf.extract_image_patches(
             obsZeroPadded,
-#            obs,
             ksizes=[1, actionShape[0], actionShape[1], 1],
-#            strides=[1, deicticPad[0]/2, deicticPad[1]/2, 1],
             strides=[1, stride, stride, 1], 
             rates=[1, 1, 1, 1], 
             padding='VALID')
@@ -125,39 +125,38 @@ def build_getMoveActionDescriptors(make_obs_ph,actionShape,actionShapeSmall,stri
 # Get candidate move descriptors given an input image. Candidates are found by
 # sliding a window over the image with the given stride (same stride applied both 
 # in x and y)
-def build_getMoveActionDescriptorsRot(make_obs_ph,patchSize,handSize,smallSize,stride):
+def build_getMoveActionDescriptorsRot(make_obs_ph,actionShape,actionShapeSmall,stride):
     
     observations_ph = U.ensure_tf_input(make_obs_ph("observation"))
     obs = observations_ph.get()
-    origImShape = tf.shape(obs)
-    patchExpanded = np.int32(patchSize*np.sqrt(2)) + 1
-    amt2Pad = patchExpanded - handSize
-    obsZeroPadded = tf.image.resize_image_with_crop_or_pad(obs,origImShape[1]+amt2Pad,origImShape[2]+amt2Pad)
+    shape = tf.shape(obs)
+    deicticPad = np.int32(2*np.floor(np.array(actionShape)/3))
+    obsZeroPadded = tf.image.resize_image_with_crop_or_pad(obs,shape[1]+deicticPad[0],shape[2]+deicticPad[1])
     patches = tf.extract_image_patches(
             obsZeroPadded,
-            ksizes=[1, patchExpanded, patchExpanded, 1],
+            ksizes=[1, actionShape[0], actionShape[1], 1],
             strides=[1, stride, stride, 1], 
             rates=[1, 1, 1, 1], 
             padding='VALID')
     patchesShape = tf.shape(patches)
-    patchesTiled = tf.reshape(patches,[patchesShape[0]*patchesShape[1]*patchesShape[2],patchExpanded,patchExpanded,1])
-    patchesTiledRot0 = tf.contrib.image.rotate(patchesTiled,0)
+    patchesTiled = tf.reshape(patches,[patchesShape[0]*patchesShape[1]*patchesShape[2],actionShape[0],actionShape[1],1])
+    
+    patchesTiledRot0 = patchesTiled
     patchesTiledRot1 = tf.contrib.image.rotate(patchesTiled,np.pi/4)
     patchesTiledRot2 = tf.contrib.image.rotate(patchesTiled,2*np.pi/4)
     patchesTiledRot3 = tf.contrib.image.rotate(patchesTiled,3*np.pi/4)
-#    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot1],axis=0)
-    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot1,patchesTiledRot2,patchesTiledRot3],axis=0)
-#    patchesTiledAll = tf.concat([patchesTiledRot1,patchesTiledRot1,patchesTiledRot3,patchesTiledRot3],axis=0)
+
+#    patchesTiledAll = tf.concat([patchesTiled,patchesTiled,patchesTiled,patchesTiled],axis=0)
 #    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot0,patchesTiledRot2,patchesTiledRot2],axis=0)
-#    patchesTiledAll = patchesTiled
+#    patchesTiledAll = tf.concat([patchesTiledRot1,patchesTiledRot1,patchesTiledRot3,patchesTiledRot3],axis=0)
+    patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot1,patchesTiledRot2,patchesTiledRot3],axis=0)
     
-    patchesTiledRotCrop = tf.image.resize_image_with_crop_or_pad(patchesTiledAll,patchSize,patchSize)
-    patchesTiledSmall = tf.image.resize_images(patchesTiledRotCrop, [smallSize, smallSize])
-    patchesTiledSmall = tf.reshape(patchesTiledSmall,[-1,smallSize,smallSize])
-    
-#    getMoveActionDescriptors = U.function(inputs=[observations_ph], outputs=[obsZeroPadded, patches, patchesTiledSmall])
+    patchesTiledSmall = tf.image.resize_images(patchesTiledAll, [actionShapeSmall[0], actionShapeSmall[1]])
+    patchesTiledSmall = tf.reshape(patchesTiledSmall,[-1,actionShapeSmall[0],actionShapeSmall[1]])
+
     getMoveActionDescriptors = U.function(inputs=[observations_ph], outputs=patchesTiledSmall)
     return getMoveActionDescriptors
+
 
 
 def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy):
@@ -192,17 +191,20 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     print_freq=1
     lr=0.0003
 
+#    useHierarchy = False
+    useHierarchy = True
+#    num_cascade = 3 # cascade used to get max value for NoRot q-function
+    num_cascade = 1 # no cascade
+
     # Set parameters related to shape of the patch and the number of patches
     descriptorShape = (env.blockSize*3,env.blockSize*3,2)
 #    descriptorShapeSmall = (10,10,2)
 #    descriptorShapeSmall = (15,15,2)
-#    descriptorShapeSmall = (20,20,2)
-    descriptorShapeSmall = (25,25,2)
+    descriptorShapeSmall = (20,20,2)
     num_states = 2 # either holding or not
     num_patches = len(env.moveCenters)**2
-    num_actions = 2*num_patches
-#    num_actions = 4*num_patches
-
+    num_actions = 2*num_patches*env.num_orientations
+    
     # Create the schedule for exploration starting from 1.
     exploration = LinearSchedule(schedule_timesteps=int(exploration_fraction * max_timesteps),
                                  initial_p=1.0,
@@ -213,8 +215,8 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
 
     # Set parameters for prioritized replay. You  can turn this off just by 
     # setting the line below to False
-    prioritized_replay=True
-#    prioritized_replay=False
+#    prioritized_replay=True
+    prioritized_replay=False
     prioritized_replay_alpha=0.6
     prioritized_replay_beta0=0.4
     prioritized_replay_beta_iters=None
@@ -243,61 +245,112 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         return U.BatchInput(env.observation_space.spaces[0].shape, name=name)
     def make_actionDeic_ph(name):
         return U.BatchInput(descriptorShapeSmall, name=name)
-    def make_target_ph(name):
+    def make_target_ph1(name):
         return U.BatchInput([1], name=name)
-    def make_weight_ph(name):
+    def make_weight_ph1(name):
         return U.BatchInput([1], name=name)
+    def make_target_phCascade(name):
+        return U.BatchInput([num_cascade], name=name)
+    def make_weight_phCascade(name):
+        return U.BatchInput([num_cascade], name=name)
 
-    getMoveActionDescriptors = build_getMoveActionDescriptors(make_obs_ph=make_obs_ph,actionShape=descriptorShape,actionShapeSmall=descriptorShapeSmall,stride=env.stride)
-    getMoveActionDescriptorsRot = build_getMoveActionDescriptorsRot(make_obs_ph=make_obs_ph,patchSize=descriptorShape[0],handSize=env.blockSize,smallSize=descriptorShapeSmall[0],stride=env.stride)
-
-    getqNotHolding = build_getq(
+    getMoveActionDescriptorsNoRot = build_getMoveActionDescriptors(make_obs_ph=make_obs_ph,actionShape=descriptorShape,actionShapeSmall=descriptorShapeSmall,stride=env.stride)
+    getMoveActionDescriptorsRot = build_getMoveActionDescriptorsRot(make_obs_ph=make_obs_ph,actionShape=descriptorShape,actionShapeSmall=descriptorShapeSmall,stride=env.stride)
+    
+    getqNotHoldingRot = build_getq(
             make_actionDeic_ph=make_actionDeic_ph,
             q_func=q_func,
             num_states=num_states,
-            num_cascade=5,
+            num_cascade=1,
             scope="deepq",
-            qscope="q_func_notholding",
+            qscope="q_func_notholding_rot",
             reuse=reuseModels
             )
-    getqHolding = build_getq(
+    getqHoldingRot = build_getq(
             make_actionDeic_ph=make_actionDeic_ph,
             q_func=q_func,
             num_states=num_states,
-            num_cascade=5,
+            num_cascade=1,
             scope="deepq",
-            qscope="q_func_holding",
+            qscope="q_func_holding_rot",
             reuse=reuseModels
             )
 
-    targetTrainNotHolding = build_targetTrain(
+    targetTrainNotHoldingRot = build_targetTrain(
         make_actionDeic_ph=make_actionDeic_ph,
-        make_target_ph=make_target_ph,
-        make_weight_ph=make_weight_ph,
+        make_target_ph=make_target_ph1,
+        make_weight_ph=make_weight_ph1,
         q_func=q_func,
         num_states=num_states,
-        num_cascade=5,
+        num_cascade=1,
         optimizer=tf.train.AdamOptimizer(learning_rate=lr),
         scope="deepq", 
-        qscope="q_func_notholding",
+        qscope="q_func_notholding_rot",
         grad_norm_clipping=1.,
         reuse=reuseModels
     )
 
-    targetTrainHolding = build_targetTrain(
+    targetTrainHoldingRot = build_targetTrain(
         make_actionDeic_ph=make_actionDeic_ph,
-        make_target_ph=make_target_ph,
-        make_weight_ph=make_weight_ph,
+        make_target_ph=make_target_ph1,
+        make_weight_ph=make_weight_ph1,
         q_func=q_func,
         num_states=num_states,
-        num_cascade=5,
+        num_cascade=1,
         optimizer=tf.train.AdamOptimizer(learning_rate=lr),
         scope="deepq", 
-        qscope="q_func_holding",
+        qscope="q_func_holding_rot",
         grad_norm_clipping=1.,
         reuse=reuseModels
     )
     
+    getqNotHoldingNoRot = build_getq(
+            make_actionDeic_ph=make_actionDeic_ph,
+            q_func=q_func,
+            num_states=num_states,
+            num_cascade=num_cascade,
+            scope="deepq",
+            qscope="q_func_notholding_norot",
+            reuse=reuseModels
+            )
+    getqHoldingNoRot = build_getq(
+            make_actionDeic_ph=make_actionDeic_ph,
+            q_func=q_func,
+            num_states=num_states,
+            num_cascade=num_cascade,
+            scope="deepq",
+            qscope="q_func_holding_norot",
+            reuse=reuseModels
+            )
+
+    targetTrainNotHoldingNoRot = build_targetTrain(
+        make_actionDeic_ph=make_actionDeic_ph,
+        make_target_ph=make_target_phCascade,
+        make_weight_ph=make_weight_phCascade,
+        q_func=q_func,
+        num_states=num_states,
+        num_cascade=num_cascade,
+        optimizer=tf.train.AdamOptimizer(learning_rate=lr),
+        scope="deepq", 
+        qscope="q_func_notholding_norot",
+        grad_norm_clipping=1.,
+        reuse=reuseModels
+    )
+
+    targetTrainHoldingNoRot = build_targetTrain(
+        make_actionDeic_ph=make_actionDeic_ph,
+        make_target_ph=make_target_phCascade,
+        make_weight_ph=make_weight_phCascade,
+        q_func=q_func,
+        num_states=num_states,
+        num_cascade=num_cascade,
+        optimizer=tf.train.AdamOptimizer(learning_rate=lr),
+        scope="deepq", 
+        qscope="q_func_holding_norot",
+        grad_norm_clipping=1.,
+        reuse=reuseModels
+    )
+
     # Initialize tabular state-value function. There are only two states (holding, not holding), so this is very easy.
     lrState = 0.1
     V = np.zeros([2,])
@@ -322,76 +375,149 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     # Iterate over time steps
     for t in range(max_timesteps):
         
-        # Get action set: <num_patches> pick actions followed by <num_patches> place actions
-#        moveDescriptors = getMoveActionDescriptors([obs[0]])
-        moveDescriptors = getMoveActionDescriptorsRot([obs[0]])
-#        moveDescriptors = moveDescriptors[0:64]
-#        moveDescriptors = moveDescriptors[64:128]
-        moveDescriptors = moveDescriptors*2-1
-        actionsPickDescriptors = np.stack([moveDescriptors, np.zeros(np.shape(moveDescriptors))],axis=3)
-        actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptors)),moveDescriptors],axis=3)
-        actionDescriptors = np.r_[actionsPickDescriptors,actionsPlaceDescriptors]
+        # Use hierarchy to get candidate actions
+        if useHierarchy:
+        
+            # Get NoRot descriptors
+            moveDescriptorsNoRot = getMoveActionDescriptorsNoRot([obs[0]])
+            moveDescriptorsNoRot = moveDescriptorsNoRot*2-1
+            actionsPickDescriptorsNoRot = np.stack([moveDescriptorsNoRot, np.zeros(np.shape(moveDescriptorsNoRot))],axis=3)
+            actionsPlaceDescriptorsNoRot = np.stack([np.zeros(np.shape(moveDescriptorsNoRot)),moveDescriptorsNoRot],axis=3)
+            actionDescriptorsNoRot = np.r_[actionsPickDescriptorsNoRot,actionsPlaceDescriptorsNoRot]
+    
+            # Get NoRot values
+            if obs[1] == 0:
+                qCurrPick = getqNotHoldingNoRot(actionsPickDescriptorsNoRot)[:,-1]
+                qCurrPlace = getqNotHoldingNoRot(actionsPlaceDescriptorsNoRot)[:,-1]
+#                qCurrPick = getqNotHoldingNoRot(actionsPickDescriptorsNoRot)[:,0]
+#                qCurrPlace = getqNotHoldingNoRot(actionsPlaceDescriptorsNoRot)[:,0]
+            elif obs[1] == 1:
+                qCurrPick = getqHoldingNoRot(actionsPickDescriptorsNoRot)[:,-1]
+                qCurrPlace = getqHoldingNoRot(actionsPlaceDescriptorsNoRot)[:,-1]
+#                qCurrPick = getqHoldingNoRot(actionsPickDescriptorsNoRot)[:,0]
+#                qCurrPlace = getqHoldingNoRot(actionsPlaceDescriptorsNoRot)[:,0]
+            else:
+                print("error: state out of bounds")
+            qCurrNoRot = np.squeeze(np.r_[qCurrPick,qCurrPlace])
+    
+            # Get Rot actions corresponding to top k% NoRot actions
+            k=0.2 # top k% of NoRot actions
+            valsNoRot = qCurrNoRot
+            topKactionsNoRot = np.argsort(valsNoRot)[-np.int32(np.shape(valsNoRot)[0]*k):]
+            topKpositionsNoRot = topKactionsNoRot % env.num_moves
+            topKpickplaceNoRot = topKactionsNoRot / env.num_moves
+            actionsCandidates = []
+            for ii in range(2):
+                eltsPos = topKpositionsNoRot[topKpickplaceNoRot==ii]
+                for jj in range(env.num_orientations):
+                    actionsCandidates = np.r_[actionsCandidates,eltsPos + jj*env.num_moves + ii*(env.num_moves*env.num_orientations)]
+            actionsCandidates = np.int32(actionsCandidates)
+        
+        # No hierarchy
+        else:
+            actionsCandidates = range(2*env.num_moves*env.num_orientations)
+            
+        # Get Rot descriptors
+        moveDescriptorsRot = getMoveActionDescriptorsRot([obs[0]])
+        moveDescriptorsRot = moveDescriptorsRot*2-1
+        actionsPickDescriptorsRot = np.stack([moveDescriptorsRot, np.zeros(np.shape(moveDescriptorsRot))],axis=3)
+        actionsPlaceDescriptorsRot = np.stack([np.zeros(np.shape(moveDescriptorsRot)),moveDescriptorsRot],axis=3)
+        actionDescriptorsRot = np.r_[actionsPickDescriptorsRot,actionsPlaceDescriptorsRot]
 
-        # Get qCurr. I split up pick and place in order to accomodate larger batches
-        qCurrNotHoldingPick = getqNotHolding(actionsPickDescriptors)
-        qCurrHoldingPick = getqHolding(actionsPickDescriptors)
-        qCurrNotHoldingPlace = getqNotHolding(actionsPlaceDescriptors)
-        qCurrHoldingPlace = getqHolding(actionsPlaceDescriptors)
-        qCurr = np.concatenate([np.r_[qCurrNotHoldingPick,qCurrNotHoldingPlace],np.r_[qCurrHoldingPick,qCurrHoldingPlace]],axis=1)
+        # Get qCurr using actionCandidates
+        actionDescriptorsRotReduced = actionDescriptorsRot[actionsCandidates]
+        if obs[1] == 0:
+            qCurrReduced = np.squeeze(getqNotHoldingRot(actionDescriptorsRotReduced))
+        elif obs[1] == 1:
+            qCurrReduced = np.squeeze(getqHoldingRot(actionDescriptorsRotReduced))
+        else:
+            print("error: state out of bounds")
+        qCurr = -100*np.ones(np.shape(actionDescriptorsRot)[0])
+        qCurr[actionsCandidates] = np.copy(qCurrReduced)
 
         # Update tabular state-value function using V(s) = max_a Q(s,a)
-        thisStateValues = np.max(qCurr[:,obs[1]])
+        thisStateValues = np.max(qCurr)
         V[obs[1]] = (1-lrState) * V[obs[1]] + lrState * thisStateValues
 
         # Select e-greedy action to execute
         qCurrNoise = qCurr + np.random.random(np.shape(qCurr))*0.01 # add small amount of noise to break ties randomly
-        action = np.argmax(qCurrNoise[:,obs[1]])
+        action = np.argmax(qCurrNoise)
         if (np.random.rand() < exploration.value(t)) and not vispolicy:
-#            action = np.random.randint(2*num_actions)
-            action = np.random.randint(4*num_actions)
+            action = np.random.randint(num_actions)
 
         if vispolicy:
             print("action: " + str(action))
             plt.subplot(1,2,1)
             plt.imshow(env.state[0][:,:,0])
-#            env.render()
-            
+
         # Execute action
         new_obs, rew, done, _ = env.step(action)
-        replay_buffer.add(cp.copy(obs[1]), np.copy(actionDescriptors[action,:]), cp.copy(rew), cp.copy(new_obs[1]), cp.copy(float(done)))
+        
+        position = action % env.num_moves
+        pickplace = action / (env.num_moves * env.num_orientations)
+        actionNoRot = position+pickplace*env.num_moves
+        
+        if useHierarchy:
+            # store both NoRot and Rot descriptors
+            replay_buffer.add(cp.copy(obs[1]), np.copy(actionDescriptorsNoRot[actionNoRot,:]), np.copy(actionDescriptorsRot[action,:]), cp.copy(rew), cp.copy(new_obs[1]), cp.copy(float(done)))
+        else:
+            # store only Rot descriptor
+            replay_buffer.add(cp.copy(obs[1]), np.copy(actionDescriptorsRot[action,:]), np.copy(actionDescriptorsRot[action,:]), cp.copy(rew), cp.copy(new_obs[1]), cp.copy(float(done)))
+            
 
         if vispolicy:
             print("rew: " + str(rew))
             print("done: " + str(done))
-#            env.render()
             plt.subplot(1,2,2)
             plt.imshow(env.state[0][:,:,0])
             plt.show()
-            
-        
+
         if t > learning_starts and t % train_freq == 0:
 
             # Get batch
             if prioritized_replay:
                 beta=beta_schedule.value(t)
-                states_t, actionPatches, rewards, states_tp1, dones, weights, batch_idxes = replay_buffer.sample(batch_size, beta)
+                states_t, actionPatchesNoRot, actionPatchesRot, rewards, states_tp1, dones, weights, batch_idxes = replay_buffer.sample(batch_size, beta)
             else:
-                states_t, actionPatches, rewards, states_tp1, dones = replay_buffer.sample(batch_size)
+                states_t, actionPatchesNoRot, actionPatchesRot, rewards, states_tp1, dones = replay_buffer.sample(batch_size)
                 weights, batch_idxes = np.ones_like(rewards), None
 
             # Calculate target
             targets = rewards + (1-dones) * gamma * V[states_tp1]
             
             # Get current q-values and calculate td error and q-value targets
-            qCurrTargetNotHolding = getqNotHolding(actionPatches)
-            qCurrTargetHolding = getqHolding(actionPatches)
+            qCurrTargetNotHolding = getqNotHoldingRot(actionPatchesRot)
+            qCurrTargetHolding = getqHoldingRot(actionPatchesRot)
             qCurrTarget = np.concatenate([qCurrTargetNotHolding,qCurrTargetHolding],axis=1)
             td_error = qCurrTarget[range(batch_size),states_t] - targets
             qCurrTarget[range(batch_size),states_t] = targets
 
             # Train
-            targetTrainNotHolding(actionPatches, np.reshape(qCurrTarget[:,0],[batch_size,1]), np.reshape(weights,[batch_size,1]))
-            targetTrainHolding(actionPatches, np.reshape(qCurrTarget[:,1],[batch_size,1]), np.reshape(weights,[batch_size,1]))
+            targetTrainNotHoldingRot(actionPatchesRot, np.reshape(qCurrTarget[:,0],[batch_size,1]), np.reshape(weights,[batch_size,1]))
+            targetTrainHoldingRot(actionPatchesRot, np.reshape(qCurrTarget[:,1],[batch_size,1]), np.reshape(weights,[batch_size,1]))
+
+            # Only train NoRot if we're doing the hierarchy
+            if useHierarchy:
+
+                # Get qCurr for NoRot
+                qCurrTargetNotHoldingNoRot = getqNotHoldingNoRot(actionPatchesNoRot)
+                qCurrTargetHoldingNoRot = getqHoldingNoRot(actionPatchesNoRot)
+                qCurrTargetNoRot = np.stack([qCurrTargetNotHoldingNoRot,qCurrTargetHoldingNoRot],axis=2)
+                qCurrTargetNoRotInit = np.copy(qCurrTargetNoRot)
+                
+                # Copy into cascade with pruning.
+                qCurrTargetNoRot[range(batch_size),0,states_t] = targets
+                for i in range(num_cascade-1):
+                    mask = targets > qCurrTargetNoRotInit[range(batch_size),i,states_t]
+                    qCurrTargetNoRot[range(batch_size),i+1,states_t] = \
+                        mask*targets + \
+                        (1-mask)*qCurrTargetNoRot[range(batch_size),i+1,states_t]
+
+                targetTrainNotHoldingNoRot(actionPatchesNoRot, qCurrTargetNoRot[:,:,0], np.tile(np.reshape(weights,[batch_size,1]),[1,num_cascade]))
+                targetTrainHoldingNoRot(actionPatchesNoRot, qCurrTargetNoRot[:,:,1], np.tile(np.reshape(weights,[batch_size,1]),[1,num_cascade]))
+
+#                targetTrainNotHoldingNoRot(actionPatchesNoRot, np.reshape(qCurrTarget[:,0],[batch_size,1]), np.reshape(weights,[batch_size,1]))
+#                targetTrainHoldingNoRot(actionPatchesNoRot, np.reshape(qCurrTarget[:,1],[batch_size,1]), np.reshape(weights,[batch_size,1]))
 
             # Update replay priorities using td_error
             if prioritized_replay:
@@ -404,7 +530,6 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         if done:
             new_obs = env.reset()
             episode_rewards.append(0.0)
-            
         mean_100ep_reward = round(np.mean(episode_rewards[-51:-1]), 1)
         num_episodes = len(episode_rewards)
         if done and print_freq is not None and len(episode_rewards) % print_freq == 0:
@@ -427,19 +552,34 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
 
     # display value function
     obs = env.reset()
-#    moveDescriptors = getMoveActionDescriptors([obs[0]])
+    
+    moveDescriptorsNoRot = getMoveActionDescriptorsNoRot([obs[0]])
+    moveDescriptorsNoRot = moveDescriptorsNoRot*2-1
+    actionsPickDescriptors = np.stack([moveDescriptorsNoRot, np.zeros(np.shape(moveDescriptorsNoRot))],axis=3)
+    actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptorsNoRot)), moveDescriptorsNoRot],axis=3)
+    qPickNotHoldingNoRot = getqNotHoldingNoRot(actionsPickDescriptors)
+    qPickHoldingNoRot = getqHoldingNoRot(actionsPickDescriptors)
+    qPickNoRotFirst = np.stack([qPickNotHoldingNoRot[:,0],qPickHoldingNoRot[:,0]],axis=1)
+    qPickNoRotLast = np.stack([qPickNotHoldingNoRot[:,-1],qPickHoldingNoRot[:,-1]],axis=1)
+    qPlaceNotHoldingNoRot = getqNotHoldingNoRot(actionsPlaceDescriptors)
+    qPlaceHoldingNoRot = getqHoldingNoRot(actionsPlaceDescriptors)
+    qPlaceNoRotFirst = np.stack([qPlaceNotHoldingNoRot[:,0],qPlaceHoldingNoRot[:,0]],axis=1)
+    qPlaceNoRotLast = np.stack([qPlaceNotHoldingNoRot[:,-1],qPlaceHoldingNoRot[:,-1]],axis=1)
+    
     moveDescriptors = getMoveActionDescriptorsRot([obs[0]])
-#    moveDescriptors = moveDescriptors[0:64]
-#    moveDescriptors = moveDescriptors[64:128]
     moveDescriptors = moveDescriptors*2-1
-    gridSize = env.gridSize / env.blockSize
-
     actionsPickDescriptors = np.stack([moveDescriptors, np.zeros(np.shape(moveDescriptors))],axis=3)
     actionsPlaceDescriptors = np.stack([np.zeros(np.shape(moveDescriptors)), moveDescriptors],axis=3)
-    
-    qPickNotHolding = getqNotHolding(actionsPickDescriptors)
-    qPickHolding = getqHolding(actionsPickDescriptors)
+    qPickNotHolding = getqNotHoldingRot(actionsPickDescriptors)
+    qPickHolding = getqHoldingRot(actionsPickDescriptors)
     qPick = np.concatenate([qPickNotHolding,qPickHolding],axis=1)
+    qPlaceNotHolding = getqNotHoldingRot(actionsPlaceDescriptors)
+    qPlaceHolding = getqHoldingRot(actionsPlaceDescriptors)
+    qPlace = np.concatenate([qPlaceNotHolding,qPlaceHolding],axis=1)
+
+    gridSize = len(env.moveCenters)
+    print("Value function for pick action in hold-0 state:")
+    print(str(np.reshape(qPickNoRotLast[:gridSize**2,0],[gridSize,gridSize])))
     print("Value function for pick action for rot0 in hold-0 state:")
     print(str(np.reshape(qPick[:gridSize**2,0],[gridSize,gridSize])))
     print("Value function for pick action for rot1 in hold-0 state:")
@@ -448,10 +588,9 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     print(str(np.reshape(qPick[2*gridSize**2:3*gridSize**2,0],[gridSize,gridSize])))
     print("Value function for pick action for rot3 in hold-0 state:")
     print(str(np.reshape(qPick[3*gridSize**2:4*gridSize**2,0],[gridSize,gridSize])))
-
-    qPlaceNotHolding = getqNotHolding(actionsPlaceDescriptors)
-    qPlaceHolding = getqHolding(actionsPlaceDescriptors)
-    qPlace = np.concatenate([qPlaceNotHolding,qPlaceHolding],axis=1)
+        
+    print("Value function for place action in hold-1 state:")
+    print(str(np.reshape(qPlaceNoRotLast[:gridSize**2,1],[gridSize,gridSize])))
     print("Value function for place action for rot0 in hold-1 state:")
     print(str(np.reshape(qPlace[:gridSize**2,1],[gridSize,gridSize])))
     print("Value function for place action for rot1 in hold-1 state:")
@@ -459,27 +598,44 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     print("Value function for place action for rot2 in hold-1 state:")
     print(str(np.reshape(qPlace[2*gridSize**2:3*gridSize**2,1],[gridSize,gridSize])))
     print("Value function for place action for rot3 in hold-1 state:")
-    print(str(np.reshape(qPlace[3*gridSize**2:4*gridSize**2,1],[gridSize,gridSize])))
-    
-    plt.subplot(2,5,1)
+    print(str(np.reshape(qPlace[3*gridSize**2:4*gridSize**2,1],[gridSize,gridSize])))    
+
+    plt.subplot(2,7,1)
     plt.imshow(np.tile(env.state[0],[1,1,3]),interpolation=None)
-    plt.subplot(2,5,2)
+    plt.subplot(2,7,2)
     plt.imshow(np.reshape(qPick[:gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,5,3)
+    plt.subplot(2,7,3)
     plt.imshow(np.reshape(qPick[gridSize**2:2*gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,5,4)
+    plt.subplot(2,7,4)
     plt.imshow(np.reshape(qPick[2*gridSize**2:3*gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,5,5)
+    plt.subplot(2,7,5)
     plt.imshow(np.reshape(qPick[3*gridSize**2:4*gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,5,7)
+    plt.subplot(2,7,6)
+    plt.imshow(np.reshape(qPickNoRotFirst[:gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,7,7)
+    plt.imshow(np.reshape(qPickNoRotLast[:gridSize**2,0],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,7,9)
     plt.imshow(np.reshape(qPlace[:gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,5,8)
+    plt.subplot(2,7,10)
     plt.imshow(np.reshape(qPlace[gridSize**2:2*gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,5,9)
+    plt.subplot(2,7,11)
     plt.imshow(np.reshape(qPlace[2*gridSize**2:3*gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
-    plt.subplot(2,5,10)
+    plt.subplot(2,7,12)
     plt.imshow(np.reshape(qPlace[3*gridSize**2:4*gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,7,13)
+    plt.imshow(np.reshape(qPlaceNoRotFirst[:gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
+    plt.subplot(2,7,14)
+    plt.imshow(np.reshape(qPlaceNoRotLast[:gridSize**2,1],[gridSize,gridSize]),vmin=5,vmax=12)
     plt.show()
+
+
+#    plt.subplot(1,3,1)
+#    plt.imshow(np.tile(env.state[0],[1,1,3]),vmin=5,vmax=12)
+#    plt.subplot(1,3,2)
+#    plt.imshow(np.reshape(qPick[:,0],[gridSize,gridSize]),vmin=5,vmax=12)
+#    plt.subplot(1,3,3)
+#    plt.imshow(np.reshape(qPlace[:,1],[gridSize,gridSize]),vmin=5,vmax=12)
+#    plt.show()
 
 if len(sys.argv) == 7:
     initEnvStride = np.int32(sys.argv[1])
@@ -488,18 +644,17 @@ if len(sys.argv) == 7:
     fileOut = sys.argv[4]
     inputmaxtimesteps = np.int32(sys.argv[5])
     vispolicy = np.int32(sys.argv[6])
-#    vispolicy = False
-    
 else:
     initEnvStride = 28
     envStride = 28
 #    fileIn = 'None'
-    fileIn = './aaa'
+    fileIn = './disk_28'
     fileOut = 'None'
 #    fileOut = './whatilearned28'
 #    inputmaxtimesteps = 2000
-    inputmaxtimesteps = 1000
+    inputmaxtimesteps = 50
     vispolicy = False
+    
 
 main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy)
     

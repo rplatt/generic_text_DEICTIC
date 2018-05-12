@@ -13,8 +13,11 @@ class BlockArrange:
 
     def __init__(self):
         
-        self.maxSide = 8
-#        self.maxSide = 16
+#        self.maxSide = 3
+#        self.maxSide = 4
+        self.maxSide = 5
+#        self.maxSide = 6
+#        self.maxSide = 7
         self.num_blocks = 2
         self.num_moves = self.maxSide**2
         
@@ -63,6 +66,8 @@ class BlockArrange:
         
 #        posBlocks = -np.ones([self.num_blocks,2])
         
+        holdingOld = np.copy(self.state[1])
+        
         X,Y = np.meshgrid(range(self.maxSide),range(self.maxSide))
         coords = np.stack([np.reshape(Y,[self.maxSide**2,]), np.reshape(X,[self.maxSide**2,])],axis=0)
 
@@ -99,7 +104,12 @@ class BlockArrange:
         reward = 0
         done = 0
         
-        # locate new block positions
+#        # reward for successful pick
+#        if (holdingOld == 0) and (self.state[1] == 1):
+#            done = 1
+#            reward = 10
+        
+        # reward for two blocks horizontal adjacency
         blockCoords = np.nonzero(self.state[0][:,:,0])
         if np.sum(self.state[0]) == 2: # if two blocks on the board
             if blockCoords[0][0] == blockCoords[0][1]: # if two blocks at same level

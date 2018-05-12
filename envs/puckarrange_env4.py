@@ -51,11 +51,11 @@ class PuckArrange:
 #        self.gap = 2 # num pixels that need to be clear around a block in order ot move it.
         self.numBlocksInRowGoal = 2
 #        self.blockType = 'Numerals'
-#        self.blockType = 'Disks'
-        self.blockType = 'Blocks'
-#        self.num_orientations = 1
+        self.blockType = 'Disks'
+#        self.blockType = 'Blocks'
+        self.num_orientations = 1
 #        self.num_orientations = 2
-        self.num_orientations = 4 # number of orientations between 0 and pi
+#        self.num_orientations = 4 # number of orientations between 0 and pi
         
         if self.blockType == 'Numerals': # load MNIST numerals
             mnist = tf.contrib.learn.datasets.load_dataset("mnist")
@@ -93,14 +93,16 @@ class PuckArrange:
                     dist2 = dist2+0.01
 #                    dist2 = ndimage.rotate(dist2+0.01,45,reshape=False)
                 elif randNum < 0.5:
-#                    dist2 = dist2+0.01
-                    dist2 = ndimage.rotate(dist2+0.01,45,reshape=False)
+                    dist2 = dist2+0.01
+#                    dist2 = ndimage.rotate(dist2+0.01,45,reshape=False)
                 elif randNum < 0.75:
-                    dist2 = ndimage.rotate(dist2+0.01,90,reshape=False)
+                    dist2 = dist2+0.01
+#                    dist2 = ndimage.rotate(dist2+0.01,90,reshape=False)
 #                    dist2 = ndimage.rotate(dist2+0.01,135,reshape=False)
                 elif randNum < 1.01:
+                    dist2 = dist2+0.01
 #                    dist2 = ndimage.rotate(dist2+0.01,90,reshape=False)
-                    dist2 = ndimage.rotate(dist2+0.01,135,reshape=False)
+#                    dist2 = ndimage.rotate(dist2+0.01,135,reshape=False)
                 else:
                     print("error!")
 
@@ -163,6 +165,7 @@ class PuckArrange:
             
             position = action % self.num_moves
             orientation = action / self.num_moves
+            orientation = 0
 #            if orientation == 0:
 #                orientation = 1
 #            if orientation == 2:
@@ -188,12 +191,6 @@ class PuckArrange:
                     else:
                         print("error in orientation 1")
                     
-#                    if orientation == 1:
-##                        imRot = np.int32(ndimage.rotate(im, 90, reshape=False)>0.5)
-#                        imRot = np.int32(ndimage.rotate(im, 45, reshape=False)>0.5)
-#                    else:
-#                        imRot = np.int32(im>0.5)
-                        
 #                    imRot = im # comment out this line to use rotation
                     shape = np.shape(imRot)
                     jjGap, iiGap = np.meshgrid(np.r_[range(0,self.gap), range(shape[0]-self.gap,shape[0])], range(0,shape[0]))
@@ -208,6 +205,7 @@ class PuckArrange:
             action -= self.num_moves * self.num_orientations
             position = action % self.num_moves
             orientation = action / self.num_moves
+            orientation = 0
 #            if orientation == 0:
 #                orientation = 1
 #            if orientation == 2:

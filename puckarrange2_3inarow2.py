@@ -177,8 +177,8 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, gridSizeB
 
     # Set parameters for prioritized replay. You  can turn this off just by 
     # setting the line below to False
-#    prioritized_replay=True
-    prioritized_replay=False
+    prioritized_replay=True
+#    prioritized_replay=False
     prioritized_replay_alpha=0.6
     prioritized_replay_beta0=0.4
     prioritized_replay_beta_iters=None

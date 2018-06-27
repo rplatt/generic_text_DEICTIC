@@ -26,11 +26,24 @@ from replay_buffer8 import ReplayBuffer, PrioritizedReplayBuffer
 from schedules import LinearSchedule
 import matplotlib.pyplot as plt
 import copy as cp
+import scipy as sp
 
 # Two disks placed in a 224x224 image. Disks placed randomly initially. 
 # Reward given when the pucks are placed adjacent. Agent must learn to pick
 # up one of the disks and place it next to the other.
 import envs.puckarrange_env2 as envstandalone
+
+
+# Define a couple of cosmetic functions
+# input: im -> image to draw lines in
+#        val -> value to set lines to
+def draw_lines_plt(im,val):
+    im[:,28,0] = val
+    im[:,56,0] = val
+    im[:,84,0] = val
+    im[28,:,0] = val
+    im[56,:,0] = val
+    im[84,:,0] = val
 
 
 # **** Make tensorflow functions ****
@@ -141,7 +154,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
     # Standard q-learning parameters
     reuseModels = None
     max_timesteps=inputmaxtimesteps
-#    exploration_fraction=0.3
+#    exploration_fraction=0.75
     exploration_fraction=1
     exploration_final_eps=0.1
     gamma=.90
@@ -149,8 +162,10 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
 
     # Used by buffering and DQN
     learning_starts=60
-    buffer_size=1000
-    batch_size=32
+#    buffer_size=1000
+#    batch_size=32
+    buffer_size=10000
+    batch_size=10
     target_network_update_freq=1
     train_freq=1
     print_freq=1
@@ -280,6 +295,8 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
         fileInV = fileIn + 'V.npy'
         V = np.load(fileInV)
 
+#    sp.misc.imsave('temp.png',obs[0][:,:,0])
+
     # Iterate over time steps
     for t in range(max_timesteps):
         
@@ -307,6 +324,11 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps):
         if np.random.rand() < exploration.value(t):
             action = np.random.randint(num_actions)
 
+#        draw_lines_plt(obs[0],1)
+#        env.render()
+#        sp.misc.imsave('temp.png',obs[0][:,:,0])
+#        draw_lines_plt(obs[0],0)
+        
         # Execute action
         new_obs, rew, done, _ = env.step(action)        
         replay_buffer.add(cp.copy(obs[1]), np.copy(actionDescriptors[action,:]), cp.copy(rew), cp.copy(new_obs[1]), cp.copy(float(done)))
@@ -414,8 +436,8 @@ if len(sys.argv) == 6:
 else:
 #    envStride = 28
 #    envStride = 7
-    initEnvStride = 2
-    envStride = 2
+    initEnvStride = 28
+    envStride = 28
     fileIn = 'None'
     fileOut = 'None'
 #    fileOut = './whatilearned28'

@@ -370,6 +370,9 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, gridSizeB
             placeMemory = np.reshape(actionDescriptors[action][:,:,1],[descriptorShapeSmall[0],descriptorShapeSmall[1],1])
         if done:
             placeMemory = np.zeros([descriptorShapeSmall[0], descriptorShapeSmall[1], 1])
+        
+#        # By uncommenting out the line below, one can see that having the place memory is not strictly necessary. BUT, the placememtory DOES seem to help
+#        placeMemory = np.zeros([descriptorShapeSmall[0], descriptorShapeSmall[1], 1])
 
         # update replay buffer
         replay_buffer.add(cp.copy(obs[1]), np.copy(actionDescriptors[action,:]), cp.copy(rew), cp.copy(new_obs[1]), cp.copy(placeMemory), cp.copy(float(done)))

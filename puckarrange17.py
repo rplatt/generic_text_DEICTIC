@@ -1,10 +1,7 @@
 # 
-# I'm adapting this version to estimate V(s) even if hierarchy is set to False. 
-# In that case, it will estimate V while still acting according to max_a Q(s,a)
+# This version will only explore hypotheses in the vicinity of non-zero portions of the image.
 #
-# This version also allows for up to 16 orientations instead of 8
-#
-# Adapted from puckarrange15.py
+# Adapted from puckarrange16.py
 #
 # Results:  
 #
@@ -23,16 +20,16 @@ import matplotlib.pyplot as plt
 import copy as cp
 import scipy as sp
 
-# Two disks placed in a 224x224 image. Disks placed randomly initially. 
-# Reward given when the pucks are placed adjacent. Agent must learn to pick
-# up one of the disks and place it next to the other.
+# This environment allows for either disks or blocks at arbitrary levels of
+# discretization in the plane. Agent gets reward when the proper arrangement
+# is achieved.
 import envs.puckarrange_env16 as envstandalone
 
 
 # **** Make tensorflow functions ****
 
 # Evaluate the q function for a given input.
-def build_getq(make_actionDeic_ph, q_func, num_states, num_cascade, scope="deepq", qscope="q_func", reuse=None):
+def build_getq(make_actionDeic_ph, q_func, num_discrete_states, num_cascade, scope="deepq", qscope="q_func", reuse=None):
 
     with tf.variable_scope(scope, reuse=reuse):
         actions_ph = U.ensure_tf_input(make_actionDeic_ph("actions"))
@@ -45,7 +42,7 @@ def build_targetTrain(make_actionDeic_ph,
                         make_target_ph,
                         make_weight_ph,
                         q_func,
-                        num_states,
+                        num_discrete_states,
                         num_cascade,
                         optimizer,
                         scope="deepq", 
@@ -92,9 +89,10 @@ def build_targetTrain(make_actionDeic_ph,
     
         return targetTrain
 
-# Get candidate move descriptors given an input image. Candidates are found by
-# sliding a window over the image with the given stride (same stride applied both 
-# in x and y)
+# Get candidate patch descriptors given an input image. Candidates are found by
+# sliding a window over x/y plane in the image with the given stride (same 
+# stride applied both in x and y). All patches have a single orientation with
+# respect to the image.
 def build_getMoveActionDescriptors(make_obs_ph,actionShape,actionShapeSmall,stride):
     
     observations_ph = U.ensure_tf_input(make_obs_ph("observation"))
@@ -117,9 +115,8 @@ def build_getMoveActionDescriptors(make_obs_ph,actionShape,actionShapeSmall,stri
     return getMoveActionDescriptors
 
 
-# Get candidate move descriptors given an input image. Candidates are found by
-# sliding a window over the image with the given stride (same stride applied both 
-# in x and y)
+# Same as build_getMoveActionDescriptors (get patch descriptors) except that
+# this version extracts patches at 16 orientations.
 def build_getMoveActionDescriptorsRot(make_obs_ph,actionShape,actionShapeSmall,stride,numOrientations):
     
     observations_ph = U.ensure_tf_input(make_obs_ph("observation"))
@@ -135,15 +132,6 @@ def build_getMoveActionDescriptorsRot(make_obs_ph,actionShape,actionShapeSmall,s
             padding='VALID')
     patchesShape = tf.shape(patches)
     patchesTiled = tf.reshape(patches,[patchesShape[0]*patchesShape[1]*patchesShape[2],actionShape[0],actionShape[1],1])
-    
-#    patchesTiledRot0 = patchesTiled
-#    patchesTiledRot1 = tf.contrib.image.rotate(patchesTiled,np.pi/8)
-#    patchesTiledRot2 = tf.contrib.image.rotate(patchesTiled,2*np.pi/8)
-#    patchesTiledRot3 = tf.contrib.image.rotate(patchesTiled,3*np.pi/8)
-#    patchesTiledRot4 = tf.contrib.image.rotate(patchesTiled,4*np.pi/8)
-#    patchesTiledRot5 = tf.contrib.image.rotate(patchesTiled,5*np.pi/8)
-#    patchesTiledRot6 = tf.contrib.image.rotate(patchesTiled,6*np.pi/8)
-#    patchesTiledRot7 = tf.contrib.image.rotate(patchesTiled,7*np.pi/8)
     
     patchesTiledRot0 = patchesTiled
     patchesTiledRot1 = tf.contrib.image.rotate(patchesTiled,np.pi/16)
@@ -163,13 +151,10 @@ def build_getMoveActionDescriptorsRot(make_obs_ph,actionShape,actionShapeSmall,s
     patchesTiledRot15 = tf.contrib.image.rotate(patchesTiled,15*np.pi/16)
 
     if numOrientations == 2:
-#        patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot4],axis=0)
         patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot8],axis=0)
     elif numOrientations == 4:
-#        patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot2,patchesTiledRot4,patchesTiledRot6],axis=0)
         patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot4,patchesTiledRot8,patchesTiledRot12],axis=0)
     elif numOrientations == 8:
-#        patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot1,patchesTiledRot2,patchesTiledRot3,patchesTiledRot4,patchesTiledRot5,patchesTiledRot6,patchesTiledRot7],axis=0)
         patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot2,patchesTiledRot4,patchesTiledRot6,patchesTiledRot8,patchesTiledRot10,patchesTiledRot12,patchesTiledRot14],axis=0)
     elif numOrientations == 16:
         patchesTiledAll = tf.concat([patchesTiledRot0,patchesTiledRot1,patchesTiledRot2,patchesTiledRot3,patchesTiledRot4,patchesTiledRot5,patchesTiledRot6,patchesTiledRot7,patchesTiledRot8,patchesTiledRot9,patchesTiledRot10,patchesTiledRot11,patchesTiledRot12,patchesTiledRot13,patchesTiledRot14,patchesTiledRot15],axis=0)
@@ -185,16 +170,12 @@ def build_getMoveActionDescriptorsRot(make_obs_ph,actionShape,actionShapeSmall,s
 
 
 
-def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy, objType, numOrientations, useHierarchy):
+def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy, objType, numOrientations, useRotHierarchy, useHandCodeHierarchy):
 
     np.set_printoptions(formatter={'float_kind':lambda x: "%.2f" % x})
 
-    # Create environment and set stride parameters for this problem instance.
-    # Most of the time, these two stride parameters will be equal. However,
-    # one might use a smaller stride for initial placement and a larger stride
-    # for action specification in order to speed things up. Unfortunately, this
-    # could cause the problem to be infeasible: no grasp might work for a given
-    # initial setup.
+    # Create environment and set two stride parameters (stride-x and stride-y) 
+    # for this problem instance. Most of the time, the two stride parameters will be equal. 
     env = envstandalone.PuckArrange()
     env.initStride = initEnvStride # stride for initial puck placement
     env.stride = envStride # stride for action specification
@@ -206,40 +187,29 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     reuseModels = None
     max_timesteps=inputmaxtimesteps
     exploration_fraction=0.75
-#    exploration_fraction=1.0
     exploration_final_eps=0.1
     gamma=.90
     num_cpu = 16
 
     # Used by buffering and DQN
     learning_starts=60
-#    buffer_size=1000
-#    batch_size=32
     buffer_size=10000
     batch_size=10
     target_network_update_freq=1
     train_freq=1
     print_freq=1
-
-#    lr=0.0004
-#    lr=0.0002 # cutting learning rate in half (5/31)
-    lr=0.0003 # cutting learning rate in half (5/31)
-#    lr=0.002 # cutting learning rate in half (5/31)
+    
+    # SGD learning rate 
+    lr=0.0003 
 
     # Set parameters related to shape of the patch and the number of patches
-    descriptorShape = (env.blockSize*3,env.blockSize*3,2)
-#    descriptorShapeSmall = (10,10,2)
-#    descriptorShapeSmall = (15,15,2)
-#    descriptorShapeSmall = (20,20,2)
-    descriptorShapeSmall = (25,25,2)
-    num_states = 2 # either holding or not
-    num_patches = len(env.moveCenters)**2
-    num_actions = 2*num_patches*env.num_orientations
+    descriptorShape = (env.blockSize*3,env.blockSize*3,2) # size of patch descriptor relative to number of "blocks" on board (each block is a 28x28 region)
+    descriptorShapeSmall = (25,25,2) # size to which each patch gets resized to. Code runs faster w/ smaller sizes, but could miss detail needed to solve the problem.
+    num_discrete_states = 2 # number of discrete states: either holding or not
+    num_patches = len(env.moveCenters)**2 # env.moveCenters is num of patches along one side of image
+    num_actions = num_discrete_states*num_patches*env.num_orientations # total actions = num discrete states X num non-rotated descriptor patches X num of orientations per patch location
 
-    # Create the schedule for exploration starting from 1.
-#    exploration = LinearSchedule(schedule_timesteps=int(exploration_fraction * max_timesteps),
-#                                 initial_p=1.0,
-#                                 final_p=exploration_final_eps)
+    # e-greedy exploration schedule. I find that starting at e=50% helps curriculum learning "remember" what was learned in the prior run.
     exploration = LinearSchedule(schedule_timesteps=int(exploration_fraction * max_timesteps),
                                  initial_p=0.5,
                                  final_p=exploration_final_eps)
@@ -266,9 +236,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
 
     # Create neural network
     q_func = models.cnn_to_mlp(
-#        convs=[(16,3,1)],
         convs=[(16,3,1), (32,3,1)],
-#        hiddens=[32],
         hiddens=[64],
         dueling=True
     )
@@ -289,7 +257,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     getqNotHoldingRot = build_getq(
             make_actionDeic_ph=make_actionDeic_ph,
             q_func=q_func,
-            num_states=num_states,
+            num_discrete_states=num_discrete_states,
             num_cascade=5,
             scope="deepq",
             qscope="q_func_notholding_rot",
@@ -298,7 +266,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     getqHoldingRot = build_getq(
             make_actionDeic_ph=make_actionDeic_ph,
             q_func=q_func,
-            num_states=num_states,
+            num_discrete_states=num_discrete_states,
             num_cascade=5,
             scope="deepq",
             qscope="q_func_holding_rot",
@@ -310,7 +278,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         make_target_ph=make_target_ph,
         make_weight_ph=make_weight_ph,
         q_func=q_func,
-        num_states=num_states,
+        num_discrete_states=num_discrete_states,
         num_cascade=5,
         optimizer=tf.train.AdamOptimizer(learning_rate=lr/2.), # rotation learns slower than norot
 #        optimizer=tf.train.GradientDescentOptimizer(learning_rate=lr/2.), # rotation learns slower than norot
@@ -325,7 +293,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         make_target_ph=make_target_ph,
         make_weight_ph=make_weight_ph,
         q_func=q_func,
-        num_states=num_states,
+        num_discrete_states=num_discrete_states,
         num_cascade=5,
         optimizer=tf.train.AdamOptimizer(learning_rate=lr/2.), # rotation learns slower than norot
 #        optimizer=tf.train.GradientDescentOptimizer(learning_rate=lr/2.), # rotation learns slower than norot
@@ -338,7 +306,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     getqNotHoldingNoRot = build_getq(
             make_actionDeic_ph=make_actionDeic_ph,
             q_func=q_func,
-            num_states=num_states,
+            num_discrete_states=num_discrete_states,
             num_cascade=5,
             scope="deepq",
             qscope="q_func_notholding_norot",
@@ -347,7 +315,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     getqHoldingNoRot = build_getq(
             make_actionDeic_ph=make_actionDeic_ph,
             q_func=q_func,
-            num_states=num_states,
+            num_discrete_states=num_discrete_states,
             num_cascade=5,
             scope="deepq",
             qscope="q_func_holding_norot",
@@ -359,7 +327,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         make_target_ph=make_target_ph,
         make_weight_ph=make_weight_ph,
         q_func=q_func,
-        num_states=num_states,
+        num_discrete_states=num_discrete_states,
         num_cascade=5,
         optimizer=tf.train.AdamOptimizer(learning_rate=lr),
 #        optimizer=tf.train.GradientDescentOptimizer(learning_rate=lr),
@@ -374,7 +342,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         make_target_ph=make_target_ph,
         make_weight_ph=make_weight_ph,
         q_func=q_func,
-        num_states=num_states,
+        num_discrete_states=num_discrete_states,
         num_cascade=5,
         optimizer=tf.train.AdamOptimizer(learning_rate=lr),
 #        optimizer=tf.train.GradientDescentOptimizer(learning_rate=lr),
@@ -408,15 +376,22 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
     # Iterate over time steps
     for t in range(max_timesteps):
         
-        # Get NoRot descriptors
+        # Get NoRot descriptors. Each x-y position gets one descriptor patch in
+        # a single orientation. Encode pick/place using a stack of two image channels.
+        # Pick actions are denoted by the patch in channel 0 and zeros in channel 1.
+        # Place actions have zeros in channel 0 and the patch in channel 1.
+        # Each elt of actionDescriptorsNoRot is a pick/place action to a specific
+        # position with orientation left unspecified.
         moveDescriptorsNoRot = getMoveActionDescriptorsNoRot([obs[0]])
         moveDescriptorsNoRot = moveDescriptorsNoRot*2-1
         actionsPickDescriptorsNoRot = np.stack([moveDescriptorsNoRot, np.zeros(np.shape(moveDescriptorsNoRot))],axis=3)
         actionsPlaceDescriptorsNoRot = np.stack([np.zeros(np.shape(moveDescriptorsNoRot)),moveDescriptorsNoRot],axis=3)
         actionDescriptorsNoRot = np.r_[actionsPickDescriptorsNoRot,actionsPlaceDescriptorsNoRot]
-    
-        # Use hierarchy to get candidate actions
-        if useHierarchy:
+
+        # If useHierarchy == 1, we evaluate the Q function hierarchically by evaluating
+        # the full Q function (getq<Not>HoldingRot) only for the top 20% of positions
+        # found using getq<Not>HoldingNoRot.
+        if useRotHierarchy == 1:
         
             # Get NoRot values
             if obs[1] == 0:
@@ -441,12 +416,27 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
                 eltsPos = topKpositionsNoRot[topKpickplaceNoRot==ii]
                 for jj in range(env.num_orientations):
                     actionsCandidates = np.r_[actionsCandidates,eltsPos + jj*env.num_moves + ii*(env.num_moves*env.num_orientations)]
-            actionsCandidates = np.int32(actionsCandidates)
-        
-        # No hierarchy
+            actionsCandidatesRotHierarchy = np.int32(actionsCandidates)
+
+        # No rot hierarchy
         else:
-            actionsCandidates = range(2*env.num_moves*env.num_orientations)
+            actionsCandidatesRotHierarchy = range(num_discrete_states*env.num_moves*env.num_orientations)
+        
+        # Hand-coded hierarchy focuses on non-zero areas of image
+        if useHandCodeHierarchy == 1:
+            nonZeroMoves = np.sum(np.sum(moveDescriptorsNoRot > 0,-1),-1) > 0
+            movesCandidates = np.nonzero(nonZeroMoves)[0]
+            actionsCandidates = []
+            for jj in range(0,2):
+                for ii in range(0,env.num_orientations):
+                    actionsCandidates = np.r_[actionsCandidates,movesCandidates + ii*env.num_moves + jj*env.num_orientations*env.num_moves]
+            actionsCandidatesHandCodeHierarchy = np.int32(actionsCandidates)
+        else:
+            actionsCandidatesHandCodeHierarchy = range(num_discrete_states*env.num_moves*env.num_orientations)
             
+        # Intersect two types of hierarchy. 
+        actionsCandidates = np.intersect1d(actionsCandidatesRotHierarchy,actionsCandidatesHandCodeHierarchy)
+        
         # Get Rot descriptors
         moveDescriptorsRot = getMoveActionDescriptorsRot([obs[0]])
         moveDescriptorsRot = moveDescriptorsRot*2-1
@@ -454,12 +444,6 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
         actionsPlaceDescriptorsRot = np.stack([np.zeros(np.shape(moveDescriptorsRot)),moveDescriptorsRot],axis=3)
         actionDescriptorsRot = np.r_[actionsPickDescriptorsRot,actionsPlaceDescriptorsRot]
 
-#        # **** DEBUG ****
-#        qCurrRot = getqNotHoldingRot(actionDescriptorsRot)
-#        qCurrRotTiled = np.reshape(qCurrRot,[2,4,64])
-#        qCurrRotMax = np.reshape(np.max(qCurrRotTiled,axis=1),[128,])
-#        qCurrRotCompare = np.c_[qCurrNoRot,qCurrRotMax]
-        
         # Get qCurr using actionCandidates
         actionDescriptorsRotReduced = actionDescriptorsRot[actionsCandidates]
         if obs[1] == 0:
@@ -584,7 +568,8 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
 
     # save learning curve
 #    filename = 'PA16_deictic_rewards_' +str(num_patches) + "_" + str(max_timesteps) + '.dat'
-    filename = 'PA16_deictic_rewards.dat'
+#    filename = 'PA16_deictic_rewards.dat'
+    filename = 'PA17_deictic_rewards.dat'
     np.savetxt(filename,episode_rewards)
 
     # save what we learned
@@ -649,7 +634,7 @@ def main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy
 #    plt.show()
 
 
-if len(sys.argv) == 10:
+if len(sys.argv) == 11:
     initEnvStride = np.int32(sys.argv[1])
     envStride = np.int32(sys.argv[2])
     fileIn = sys.argv[3]
@@ -658,28 +643,30 @@ if len(sys.argv) == 10:
     vispolicy = np.int32(sys.argv[6])
     objType = sys.argv[7]
     numOrientations = np.int32(sys.argv[8])
-    useHierarchy = np.int32(sys.argv[9])
+    useRotHierarchy = np.int32(sys.argv[9])
+    useHandCodeHierarchy = np.int32(sys.argv[10])
     
 else:
-    initEnvStride = 4
-    envStride = 4
-#    fileIn = 'None'
+    initEnvStride = 28
+    envStride = 28
+    fileIn = 'None'
 #    fileIn = './disk_28_2'
-    fileIn = './rect_4_16'    
+#    fileIn = './rect_4_16'    
     fileOut = 'None'
 #    fileOut = './whatilearned28'
-    inputmaxtimesteps = 20
+    inputmaxtimesteps = 5000
 #    inputmaxtimesteps = 100
-#    vispolicy = False
-    vispolicy = True
-#    objType = 'Disks'
-    objType = 'Blocks'
-#    numOrientations = 4
-    numOrientations = 16
-    useHierarchy = 1
-    
+    vispolicy = False
+#    vispolicy = True
+    objType = 'Disks'
+#    objType = 'Blocks'
+    numOrientations = 2
+#    numOrientations = 16
+    useRotHierarchy = 1
+    useHandCodeHierarchy = 1
 
-main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy, objType, numOrientations, useHierarchy)
+
+main(initEnvStride, envStride, fileIn, fileOut, inputmaxtimesteps, vispolicy, objType, numOrientations, useRotHierarchy, useHandCodeHierarchy)
     
 #if __name__ == '__main__':
 #    main()

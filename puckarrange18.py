@@ -1,9 +1,18 @@
 # 
-# This version will only explore hypotheses in the vicinity of non-zero portions of the image.
+# Disk/Block arrangement in SE(2) as of 6/27/2018. 
+#
+# Features of this version:
+#  -- option for two-stage rotation hierarchy
+#  -- option for filtering out of positions with associated zero-patches
+#  -- can handle either blocks or disks
+#  -- 32 possible orientations
+#  -- only a single bit state (holding/notholding). For a version of the code
+#          that allows for history-as-state, see puckarrange2_3inarow3.py
 #
 # Adapted from puckarrange17.py
 #
-# Results:  
+# How to run: python puckarrange_iter1.py runs the full curriculum cascade. Have a
+#             look at that code to get examples of single-runs of this code.
 #
 #
 import sys as sys

@@ -13,9 +13,9 @@ def VerifyProgress(filename):
 
 def main():
 
-    for i in range(3,10):
+    for i in range(0,10):
 
-#        # parameters: stridey, stridex, filein, fileout, numIter, visualize, obj, numOrientations, useHierarchy
+#        # parameters: stridey, stridex, filein, fileout, numIter, visualize, obj, numOrientations, useRotHierarchy, useHandCodeHierarchy
 
         while True:
             os.system("python puckarrange18.py 28 28 None ./disk_28_2 5000 0 Disks 2 0 1")
